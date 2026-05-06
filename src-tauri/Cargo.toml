@@ -1,0 +1,27 @@
+[package]
+name = "centralita"
+version = "0.1.0"
+description = "Aplicacion de escritorio portable para organizar y ejecutar proyectos locales"
+authors = ["Fernando Luna Marcuell"]
+license = ""
+repository = ""
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+name = "centralita_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.5.6", features = [] }
+
+[dependencies]
+rusqlite = { version = "0.32.1", features = ["bundled"] }
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+log = "0.4"
+tauri = { version = "2.10.3", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-log = "2"
+time = { version = "0.3.47", features = ["formatting"] }
+uuid = { version = "1.23.0", features = ["v7"] }

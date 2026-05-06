@@ -1,0 +1,12 @@
+{
+  "name": "scanner-node-app",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "react": "^19.0.0",
+    "vite": "^8.0.0"
+  }
+}
