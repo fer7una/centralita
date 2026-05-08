@@ -7,6 +7,7 @@ const DEFAULT_IGNORED_DIRECTORIES: &[&str] = &[
     "target",
     "build",
     ".git",
+    ".gradle",
     ".idea",
     "dist",
     ".next",
