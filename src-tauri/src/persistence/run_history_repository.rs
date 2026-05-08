@@ -1,7 +1,7 @@
 use rusqlite::{params, OptionalExtension};
 
 use crate::{
-    models::{EntityId, HealthStatus, RunHistoryEntry, RuntimeStatus},
+    models::{EntityId, RunHistoryEntry, RuntimeStatus},
     persistence::{AppDatabase, PersistenceResult},
 };
 
@@ -15,7 +15,6 @@ pub struct FinalizeRunHistoryInput {
     pub ended_at: Option<String>,
     pub exit_code: Option<i32>,
     pub final_runtime_status: RuntimeStatus,
-    pub final_health_status: Option<HealthStatus>,
     pub stop_reason: Option<String>,
     pub error_message: Option<String>,
 }
@@ -36,12 +35,11 @@ impl RunHistoryRepository {
             ended_at,
             exit_code,
             final_runtime_status,
-            final_health_status,
             stop_reason,
             error_message,
             command_preview
           )
-          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
         "#,
             params![
                 entry.id,
@@ -50,7 +48,6 @@ impl RunHistoryRepository {
                 entry.ended_at,
                 entry.exit_code,
                 serialize_runtime_status(&entry.final_runtime_status)?,
-                serialize_health_status(&entry.final_health_status)?,
                 entry.stop_reason,
                 entry.error_message,
                 entry.command_preview
@@ -73,9 +70,8 @@ impl RunHistoryRepository {
             ended_at = ?2,
             exit_code = ?3,
             final_runtime_status = ?4,
-            final_health_status = ?5,
-            stop_reason = ?6,
-            error_message = ?7
+            stop_reason = ?5,
+            error_message = ?6
           WHERE id = ?1
         "#,
             params![
@@ -83,7 +79,6 @@ impl RunHistoryRepository {
                 input.ended_at,
                 input.exit_code,
                 serialize_runtime_status(&input.final_runtime_status)?,
-                serialize_health_status(&input.final_health_status)?,
                 input.stop_reason,
                 input.error_message
             ],
@@ -107,7 +102,6 @@ impl RunHistoryRepository {
                 ended_at,
                 exit_code,
                 final_runtime_status,
-                final_health_status,
                 stop_reason,
                 error_message,
                 command_preview
@@ -136,7 +130,6 @@ impl RunHistoryRepository {
             ended_at,
             exit_code,
             final_runtime_status,
-            final_health_status,
             stop_reason,
             error_message,
             command_preview
@@ -167,7 +160,6 @@ impl RunHistoryRepository {
             rh.ended_at,
             rh.exit_code,
             rh.final_runtime_status,
-            rh.final_health_status,
             rh.stop_reason,
             rh.error_message,
             rh.command_preview
@@ -193,10 +185,9 @@ fn map_run_history_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RunHistoryEn
         ended_at: row.get(3)?,
         exit_code: row.get(4)?,
         final_runtime_status: deserialize_runtime_status(row.get(5)?).map_err(to_sql_error)?,
-        final_health_status: deserialize_health_status(row.get(6)?).map_err(to_sql_error)?,
-        stop_reason: row.get(7)?,
-        error_message: row.get(8)?,
-        command_preview: row.get(9)?,
+        stop_reason: row.get(6)?,
+        error_message: row.get(7)?,
+        command_preview: row.get(8)?,
     })
 }
 
@@ -211,25 +202,6 @@ fn deserialize_runtime_status(value: String) -> PersistenceResult<RuntimeStatus>
     Ok(serde_json::from_value(serde_json::Value::String(value))?)
 }
 
-fn serialize_health_status(value: &Option<HealthStatus>) -> PersistenceResult<Option<String>> {
-    match value {
-        Some(value) => match serde_json::to_value(value)? {
-            serde_json::Value::String(serialized) => Ok(Some(serialized)),
-            _ => Err(std::io::Error::other("health status must serialize as string").into()),
-        },
-        None => Ok(None),
-    }
-}
-
-fn deserialize_health_status(value: Option<String>) -> PersistenceResult<Option<HealthStatus>> {
-    match value {
-        Some(value) => Ok(Some(serde_json::from_value(serde_json::Value::String(
-            value,
-        ))?)),
-        None => Ok(None),
-    }
-}
-
 fn to_sql_error(error: Box<dyn std::error::Error + Send + Sync>) -> rusqlite::Error {
     rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, error)
 }
@@ -238,7 +210,7 @@ fn to_sql_error(error: Box<dyn std::error::Error + Send + Sync>) -> rusqlite::Er
 mod tests {
     use super::{FinalizeRunHistoryInput, RunHistoryRepository};
     use crate::{
-        models::{GroupNode, HealthStatus, ProjectNode, RunHistoryEntry, RuntimeStatus, Workspace},
+        models::{GroupNode, ProjectNode, RunHistoryEntry, RuntimeStatus, Workspace},
         persistence::{
             test_utils::TestDatabase, GroupRepository, ProjectRepository, WorkspaceRepository,
         },
@@ -256,7 +228,6 @@ mod tests {
             ended_at: None,
             exit_code: None,
             final_runtime_status: RuntimeStatus::Running,
-            final_health_status: None,
             stop_reason: None,
             error_message: None,
             command_preview: "npm run dev".into(),
@@ -272,7 +243,6 @@ mod tests {
                     ended_at: Some("2026-04-17T09:05:00Z".into()),
                     exit_code: Some(0),
                     final_runtime_status: RuntimeStatus::Stopped,
-                    final_health_status: Some(HealthStatus::Healthy),
                     stop_reason: Some("manual-stop".into()),
                     error_message: None,
                 },
@@ -291,10 +261,6 @@ mod tests {
             .expect("workspace run history should load");
 
         assert_eq!(stored_entry.final_runtime_status, RuntimeStatus::Stopped);
-        assert_eq!(
-            stored_entry.final_health_status,
-            Some(HealthStatus::Healthy)
-        );
         assert_eq!(project_history.len(), 1);
         assert_eq!(workspace_history.len(), 1);
     }
@@ -336,7 +302,6 @@ mod tests {
             detection_confidence: None,
             detection_evidence: None,
             warnings: None,
-            health_check: None,
             created_at: "2026-04-17T09:00:00Z".into(),
             updated_at: "2026-04-17T09:00:00Z".into(),
         };

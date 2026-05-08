@@ -10,7 +10,6 @@ export const TAURI_COMMANDS = {
   deleteProject: 'delete_project',
   deleteWorkspace: 'delete_workspace',
   getProjectGitInfo: 'get_project_git_info',
-  getProjectHealthStatus: 'get_project_health_status',
   getProjectLogs: 'get_project_logs',
   getProjectRuntimeStatus: 'get_project_runtime_status',
   getWorkspaceObservabilitySummary: 'get_workspace_observability_summary',
@@ -19,7 +18,6 @@ export const TAURI_COMMANDS = {
   listProjectRunHistory: 'list_project_run_history',
   listWorkspaceRunHistory: 'list_workspace_run_history',
   listWorkspaces: 'list_workspaces',
-  refreshProjectHealth: 'refresh_project_health',
   renameWorkspace: 'rename_workspace',
   restartProject: 'restart_project',
   startGroup: 'start_group',
@@ -30,7 +28,6 @@ export const TAURI_COMMANDS = {
   stopWorkspace: 'stop_workspace',
   updateGroup: 'update_group',
   updateProject: 'update_project',
-  updateProjectHealthCheck: 'update_project_health_check',
   validateProjectCommand: 'validate_project_command',
 } as const
 

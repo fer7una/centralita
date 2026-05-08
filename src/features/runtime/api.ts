@@ -1,15 +1,12 @@
 import { invokeCommand, TAURI_COMMANDS } from '../../shared/api/tauri'
 import type {
-  GetProjectHealthStatusInput,
   GroupRuntimeInput,
-  ProjectHealthState,
   GetProjectLogsInput,
   ProcessRuntimeState,
   ProjectRuntimeInput,
   RunHistoryEntry,
   RuntimeBulkOperationResult,
   RuntimeLogLine,
-  UpdateProjectHealthCheckInput,
   WorkspaceObservabilitySummary,
   WorkspaceRuntimeInput,
   WorkspaceRuntimeStatus,
@@ -53,27 +50,6 @@ export function getProjectLogs(input: GetProjectLogsInput) {
   return invokeCommand<RuntimeLogLine[]>(TAURI_COMMANDS.getProjectLogs, {
     input,
   })
-}
-
-export function getProjectHealthStatus(input: GetProjectHealthStatusInput) {
-  return invokeCommand<ProjectHealthState>(
-    TAURI_COMMANDS.getProjectHealthStatus,
-    { input },
-  )
-}
-
-export function refreshProjectHealth(input: ProjectRuntimeInput) {
-  return invokeCommand<ProjectHealthState>(
-    TAURI_COMMANDS.refreshProjectHealth,
-    { input },
-  )
-}
-
-export function updateProjectHealthCheck(input: UpdateProjectHealthCheckInput) {
-  return invokeCommand<ProjectHealthState>(
-    TAURI_COMMANDS.updateProjectHealthCheck,
-    { input },
-  )
 }
 
 export function listProjectRunHistory(input: ListProjectRunHistoryInput) {

@@ -9,8 +9,6 @@ import {
   FolderPlus,
   GitBranch,
   Hash,
-  Heart,
-  HeartPulse,
   Loader2,
   MinusCircle,
   Play,
@@ -26,7 +24,6 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentType, ReactNode, SVGProps } from 'react'
 import { BlockedActionButton } from './components/BlockedActionButton'
 import { ModalFrame } from './components/ModalFrame'
-import { HealthStatusBadge } from './components/health/HealthStatusBadge'
 import { ProjectLogsPanel } from './components/logs/ProjectLogsPanel'
 import { RuntimeStatusBadge } from './components/runtime/RuntimeStatusBadge'
 import {
@@ -40,11 +37,7 @@ import {
   flattenGroups,
   flattenProjects,
   groupNameExists,
-  groupHealthStatus,
   groupRuntimeStatus,
-  groupSupportsHealth,
-  groupsSupportHealth,
-  projectSupportsHealth,
 } from './features/workspace/tree'
 import {
   getProjectGitInfo,
@@ -57,8 +50,6 @@ import type {
   DetectionResult,
   DetectedProjectType,
   GroupTreeNode,
-  HealthCheckConfig,
-  HealthStatus,
   ProcessRuntimeState,
   ProjectGitInfo,
   ProjectNode,
@@ -346,22 +337,6 @@ function runtimeStatusTone(status: RuntimeStatus): MetricTone | undefined {
       return 'warning'
     case 'FAILED':
       return 'error'
-    default:
-      return undefined
-  }
-}
-
-function healthStatusTone(status: HealthStatus): MetricTone | undefined {
-  switch (status) {
-    case 'HEALTHY':
-      return 'running'
-    case 'CHECKING':
-      return 'warning'
-    case 'UNHEALTHY':
-      return 'error'
-    case 'UNKNOWN':
-      return 'info'
-    case 'UNSUPPORTED':
     default:
       return undefined
   }
@@ -671,18 +646,6 @@ function CentralitaApp() {
     resolvedSelection?.type === 'project'
       ? findProject(workspaceStore.groups, resolvedSelection.id)
       : null
-  const activeWorkspaceSupportsHealth = groupsSupportHealth(
-    workspaceStore.groups,
-  )
-  const selectedGroupSupportsHealth = selectedGroup
-    ? groupSupportsHealth(selectedGroup)
-    : false
-  const selectedProjectSupportsHealth = selectedProject
-    ? projectSupportsHealth(selectedProject)
-    : false
-  const selectedProjectHealthCheck = selectedProject?.healthCheck?.enabled
-    ? selectedProject.healthCheck
-    : null
   const createGroupRootGroup = createGroupRootGroupId
     ? findGroup(workspaceStore.groups, createGroupRootGroupId)
     : null
@@ -709,9 +672,6 @@ function CentralitaApp() {
 
   const selectedRuntimeState = selectedProject
     ? (runtimeStore.statusByProjectId[selectedProject.id] ?? null)
-    : null
-  const selectedHealthState = selectedProject
-    ? (runtimeStore.healthByProjectId[selectedProject.id] ?? null)
     : null
   const selectedRuntimeLogs = selectedProject
     ? (runtimeStore.logsByProjectId[selectedProject.id] ?? [])
@@ -1023,19 +983,11 @@ function CentralitaApp() {
         ? 'El proyecto se está deteniendo.'
         : undefined
   const canRestartProject = !restartProjectBlockedReason
-  const refreshProjectHealthBlockedReason = selectedProject?.healthCheck
-    ?.enabled
-    ? undefined
-    : 'Activa un health check para refrescarlo.'
-  const canRefreshProjectHealth = !refreshProjectHealthBlockedReason
   const clearProjectLogsBlockedReason =
     selectedRuntimeLogs.length > 0
       ? undefined
       : 'No hay logs para limpiar en la vista.'
   const canClearProjectLogs = !clearProjectLogsBlockedReason
-  const persistProjectHealthBlockedReason = selectedProjectHealthCheck
-    ? undefined
-    : 'No hay configuración de health check activa.'
   const analyzeImportBlockedReason = !importPath.trim()
     ? 'Selecciona o escribe una carpeta para analizar.'
     : workspaceStore.isAnalyzing
@@ -1148,16 +1100,6 @@ function CentralitaApp() {
 
     setImportPath(normalizeWindowsPath(selectedPath))
     workspaceStore.actions.clearAnalysis()
-  }
-
-  function handleSaveHealthCheck(healthCheck: HealthCheckConfig | null) {
-    if (!selectedProject) {
-      return Promise.resolve()
-    }
-
-    return runtimeStore.actions
-      .updateProjectHealthCheck(selectedProject.id, healthCheck)
-      .then(() => workspaceStore.actions.refresh())
   }
 
   function resetImportFlow() {
@@ -1789,12 +1731,6 @@ function CentralitaApp() {
                 status={runtimeStore.workspaceStatus}
                 variant="compact"
               />
-              {activeWorkspaceSupportsHealth ? (
-                <HealthStatusBadge
-                  status={runtimeStore.workspaceHealthStatus}
-                  variant="compact"
-                />
-              ) : null}
             </div>
             <div className="project-header-copy">
               <p className="eyebrow">Workspace</p>
@@ -1907,14 +1843,6 @@ function CentralitaApp() {
             tone={runtimeStatusTone(runtimeStore.workspaceStatus)}
             value={runtimeStore.workspaceStatus}
           />
-          {activeWorkspaceSupportsHealth ? (
-            <MetricTile
-              icon={Heart}
-              label="Health"
-              tone={healthStatusTone(runtimeStore.workspaceHealthStatus)}
-              value={runtimeStore.workspaceHealthStatus}
-            />
-          ) : null}
           <MetricTile
             icon={Hash}
             label="Grupos"
@@ -1947,10 +1875,6 @@ function CentralitaApp() {
     }
 
     const runtimeStatus = selectedGroupStatus
-    const healthStatus = groupHealthStatus(
-      selectedGroup,
-      runtimeStore.healthByProjectId,
-    )
 
     return (
       <section className="detail-stack">
@@ -1958,9 +1882,6 @@ function CentralitaApp() {
           <div className="project-header-main">
             <div className="project-header-status-stack">
               <RuntimeStatusBadge status={runtimeStatus} variant="compact" />
-              {selectedGroupSupportsHealth ? (
-                <HealthStatusBadge status={healthStatus} variant="compact" />
-              ) : null}
             </div>
             <div className="project-header-copy">
               <p className="eyebrow">Grupo</p>
@@ -2058,14 +1979,6 @@ function CentralitaApp() {
             tone={runtimeStatusTone(runtimeStatus)}
             value={runtimeStatus}
           />
-          {selectedGroupSupportsHealth ? (
-            <MetricTile
-              icon={Heart}
-              label="Health"
-              tone={healthStatusTone(healthStatus)}
-              value={healthStatus}
-            />
-          ) : null}
           <MetricTile
             icon={Hash}
             label="Subgrupos"
@@ -2099,12 +2012,10 @@ function CentralitaApp() {
     }
 
     const runtimeStatus = selectedRuntimeState?.status ?? 'STOPPED'
-    const healthStatus = selectedHealthState?.status ?? 'UNKNOWN'
     const workingDir = normalizeWindowsPath(
       selectedProject.workingDir ?? selectedProject.path,
     )
     const runtimeError = selectedRuntimeState?.lastError ?? null
-    const healthError = selectedHealthState?.lastError ?? null
 
     return (
       <section className="detail-stack">
@@ -2112,9 +2023,6 @@ function CentralitaApp() {
           <div className="project-header-main">
             <div className="project-header-status-stack">
               <RuntimeStatusBadge status={runtimeStatus} variant="compact" />
-              {selectedProjectSupportsHealth ? (
-                <HealthStatusBadge status={healthStatus} variant="compact" />
-              ) : null}
             </div>
             <div className="project-header-copy">
               <p className="eyebrow">Proyecto</p>
@@ -2186,23 +2094,6 @@ function CentralitaApp() {
             >
               <RotateCcw aria-hidden="true" size={18} />
             </BlockedActionButton>
-            {selectedProjectSupportsHealth ? (
-              <BlockedActionButton
-                aria-label="Refrescar health"
-                blockedReason={refreshProjectHealthBlockedReason}
-                className="icon-button"
-                disabled={!canRefreshProjectHealth}
-                onClick={() =>
-                  void runtimeStore.actions.refreshProjectHealth(
-                    selectedProject.id,
-                  )
-                }
-                title="Refrescar health"
-                type="button"
-              >
-                <HeartPulse aria-hidden="true" size={18} />
-              </BlockedActionButton>
-            ) : null}
             <BlockedActionButton
               aria-label="Limpiar vista"
               blockedReason={clearProjectLogsBlockedReason}
@@ -2260,28 +2151,6 @@ function CentralitaApp() {
                 : '—'
             }
           />
-          {selectedProjectSupportsHealth ? (
-            <MetricTile
-              icon={Heart}
-              label="Health"
-              tone={healthStatusTone(healthStatus)}
-              value={healthStatus}
-            />
-          ) : null}
-          {selectedProjectSupportsHealth ? (
-            <MetricTile
-              icon={Clock}
-              label="Última check"
-              value={formatDateTime(selectedHealthState?.lastCheckedAt, '—')}
-            />
-          ) : null}
-          {selectedProjectSupportsHealth ? (
-            <MetricTile
-              icon={CheckCircle2}
-              label="Último healthy"
-              value={formatDateTime(selectedHealthState?.lastHealthyAt, '—')}
-            />
-          ) : null}
           <MetricTile
             icon={AlertTriangle}
             label="Último error"
@@ -2325,9 +2194,7 @@ function CentralitaApp() {
           <div className="section-title">
             <div>
               <p className="eyebrow">Estado</p>
-              <h3>
-                {selectedProjectSupportsHealth ? 'Runtime y health' : 'Runtime'}
-              </h3>
+              <h3>Runtime</h3>
             </div>
           </div>
           <ul className="detail-list">
@@ -2349,32 +2216,6 @@ function CentralitaApp() {
               <strong>Último error runtime</strong>
               <span>{runtimeError ?? 'Sin errores registrados'}</span>
             </li>
-            {selectedProjectSupportsHealth ? (
-              <>
-                <li>
-                  <strong>Último health error</strong>
-                  <span>{healthError ?? 'Sin errores registrados'}</span>
-                </li>
-                <li>
-                  <strong>Última comprobación</strong>
-                  <span>
-                    {formatDateTime(
-                      selectedHealthState?.lastCheckedAt,
-                      'Sin comprobaciones',
-                    )}
-                  </span>
-                </li>
-                <li>
-                  <strong>Último healthy</strong>
-                  <span>
-                    {formatDateTime(
-                      selectedHealthState?.lastHealthyAt,
-                      'Todavía no sano',
-                    )}
-                  </span>
-                </li>
-              </>
-            ) : null}
           </ul>
         </article>
 
@@ -2388,13 +2229,7 @@ function CentralitaApp() {
           <ProjectLogsPanel lines={selectedRuntimeLogs} />
         </section>
 
-        <section
-          className={
-            selectedProjectSupportsHealth
-              ? 'detail-columns'
-              : 'detail-columns detail-columns-full'
-          }
-        >
+        <section className="detail-columns detail-columns-full">
           <article className="card detail-panel">
             <div className="section-title">
               <div>
@@ -2437,60 +2272,6 @@ function CentralitaApp() {
             )}
           </article>
 
-          {selectedProjectSupportsHealth ? (
-            <article className="card detail-panel">
-              <div className="section-title">
-                <div>
-                  <p className="eyebrow">Health check</p>
-                  <h3>Configuración activa</h3>
-                </div>
-                <BlockedActionButton
-                  blockedReason={persistProjectHealthBlockedReason}
-                  disabled={!selectedProjectHealthCheck}
-                  onClick={() =>
-                    void handleSaveHealthCheck(selectedProjectHealthCheck)
-                  }
-                  type="button"
-                >
-                  Persistir estado actual
-                </BlockedActionButton>
-              </div>
-              <div className="health-tile-grid">
-                <MetricTile
-                  icon={Settings2}
-                  label="Tipo"
-                  value={selectedProjectHealthCheck?.type.toUpperCase() ?? '—'}
-                />
-                <MetricTile
-                  icon={Clock}
-                  label="Intervalo"
-                  value={
-                    selectedProjectHealthCheck
-                      ? `${selectedProjectHealthCheck.intervalMs} ms`
-                      : '—'
-                  }
-                />
-                <MetricTile
-                  icon={Clock}
-                  label="Timeout"
-                  value={
-                    selectedProjectHealthCheck
-                      ? `${selectedProjectHealthCheck.timeoutMs} ms`
-                      : '—'
-                  }
-                />
-                <MetricTile
-                  icon={Clock}
-                  label="Grace period"
-                  value={
-                    selectedProjectHealthCheck
-                      ? `${selectedProjectHealthCheck.gracePeriodMs} ms`
-                      : '—'
-                  }
-                />
-              </div>
-            </article>
-          ) : null}
         </section>
       </section>
     )
@@ -3086,7 +2867,7 @@ function CentralitaApp() {
                 </button>
                 <div className="navigator-filter-controls">
                   <label className="field navigator-filter-field">
-                    <span>Runtime</span>
+                    <span>Filtrar por estado</span>
                     <select
                       onChange={(event) =>
                         runtimeStore.actions.setRuntimeFilter(
@@ -3105,37 +2886,11 @@ function CentralitaApp() {
                     </select>
                   </label>
 
-                  {activeWorkspaceSupportsHealth ? (
-                    <label className="field navigator-filter-field">
-                      <span>Health</span>
-                      <select
-                        onChange={(event) =>
-                          runtimeStore.actions.setHealthFilter(
-                            event.target
-                              .value as typeof runtimeStore.healthFilter,
-                          )
-                        }
-                        value={runtimeStore.healthFilter}
-                      >
-                        <option value="ALL">Todos los health</option>
-                        <option value="HEALTHY">HEALTHY</option>
-                        <option value="CHECKING">CHECKING</option>
-                        <option value="UNHEALTHY">UNHEALTHY</option>
-                        <option value="UNKNOWN">UNKNOWN</option>
-                      </select>
-                    </label>
-                  ) : null}
                 </div>
               </div>
             </div>
             <WorkspaceRuntimeTreeView
               activeWorkspaceId={workspaceStore.activeWorkspaceId}
-              healthByProjectId={runtimeStore.healthByProjectId}
-              healthFilter={
-                activeWorkspaceSupportsHealth
-                  ? runtimeStore.healthFilter
-                  : 'ALL'
-              }
               isLoadingPersistedState={workspaceStore.isLoading}
               onEnsureWorkspaceTree={(workspaceId) =>
                 workspaceStore.actions.ensureWorkspaceTree(workspaceId)
@@ -3155,7 +2910,6 @@ function CentralitaApp() {
               runtimeFilter={runtimeStore.runtimeFilter}
               selectedItem={resolvedSelection}
               statusByProjectId={runtimeStore.statusByProjectId}
-              workspaceHealthStatus={runtimeStore.workspaceHealthStatus}
               workspaceStatus={runtimeStore.workspaceStatus}
               workspaceTrees={workspaceStore.treesByWorkspaceId}
               workspaces={workspaceStore.workspaces}

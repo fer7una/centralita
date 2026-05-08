@@ -1,22 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type MouseEvent, type PointerEvent } from 'react'
-import {
-  groupHealthStatus,
-  groupRuntimeStatus,
-  groupSupportsHealth,
-  groupsSupportHealth,
-  projectHealthStatus,
-  projectSupportsHealth,
-} from '../../features/workspace/tree'
+import { groupRuntimeStatus } from '../../features/workspace/tree'
 import type {
   GroupTreeNode,
-  HealthStatus,
   ProcessRuntimeState,
-  ProjectHealthState,
   RuntimeStatus,
   Workspace,
   WorkspaceTree,
 } from '../../types'
-import { HealthStatusBadge } from '../health/HealthStatusBadge'
 import { RuntimeStatusBadge } from './RuntimeStatusBadge'
 
 type TreeSelection =
@@ -49,8 +39,6 @@ export type NavigatorDropTarget =
 
 type WorkspaceRuntimeTreeViewProps = {
   activeWorkspaceId: string | null
-  healthByProjectId: Record<string, ProjectHealthState>
-  healthFilter: HealthStatus | 'ALL'
   isLoadingPersistedState: boolean
   onEnsureWorkspaceTree: (workspaceId: string) => Promise<unknown>
   onRequestMove: (
@@ -63,7 +51,6 @@ type WorkspaceRuntimeTreeViewProps = {
   runtimeFilter: RuntimeStatus | 'ALL'
   selectedItem: TreeSelection
   statusByProjectId: Record<string, ProcessRuntimeState>
-  workspaceHealthStatus: HealthStatus
   workspaceStatus: RuntimeStatus
   workspaceTrees: Record<string, WorkspaceTree>
   workspaces: Workspace[]
@@ -183,8 +170,6 @@ function findProjectAncestorIds(
 
 export function WorkspaceRuntimeTreeView({
   activeWorkspaceId,
-  healthByProjectId,
-  healthFilter,
   isLoadingPersistedState,
   onEnsureWorkspaceTree,
   onRequestMove,
@@ -194,7 +179,6 @@ export function WorkspaceRuntimeTreeView({
   runtimeFilter,
   selectedItem,
   statusByProjectId,
-  workspaceHealthStatus,
   workspaceStatus,
   workspaceTrees,
   workspaces,
@@ -496,18 +480,12 @@ export function WorkspaceRuntimeTreeView({
           const isActiveDropTarget = activeDropTargetKey === dropTargetKey(workspaceDropTarget)
           const canDropOnRootZone = canDropGroupOnWorkspaceRoot(draggedItem, workspace.id)
           const workspaceTree = workspaceTrees[workspace.id] ?? null
-          const workspaceSupportsHealth = workspaceTree
-            ? groupsSupportHealth(workspaceTree.groups)
-            : false
-          const applyActiveFilters =
-            isActiveWorkspace && (runtimeFilter !== 'ALL' || healthFilter !== 'ALL')
+          const applyActiveFilters = isActiveWorkspace && runtimeFilter !== 'ALL'
           const workspaceGroups = workspaceTree
             ? filterGroups(
                 workspaceTree.groups,
                 statusByProjectId,
-                healthByProjectId,
                 runtimeFilter,
-                healthFilter,
                 applyActiveFilters,
               )
             : []
@@ -582,9 +560,6 @@ export function WorkspaceRuntimeTreeView({
                   {isActiveWorkspace ? (
                     <div className="project-badges">
                       <RuntimeStatusBadge status={workspaceStatus} variant="compact" />
-                      {workspaceSupportsHealth ? (
-                        <HealthStatusBadge status={workspaceHealthStatus} variant="compact" />
-                      ) : null}
                     </div>
                   ) : null}
                 </button>
@@ -621,7 +596,6 @@ export function WorkspaceRuntimeTreeView({
                               draggedItemKey={draggedItemKey}
                               expandedGroupIds={expandedGroupIds}
                               group={group}
-                              healthByProjectId={healthByProjectId}
                               key={group.id}
                               onBeginPointerDrag={beginPointerDrag}
                               onConsumeSuppressedClick={consumeSuppressedClick}
@@ -672,13 +646,11 @@ export function WorkspaceRuntimeTreeView({
 type TreeGroupProps = Omit<
   WorkspaceRuntimeTreeViewProps,
   | 'activeWorkspaceId'
-  | 'healthFilter'
   | 'isLoadingPersistedState'
   | 'onEnsureWorkspaceTree'
   | 'onRequestMove'
   | 'onSelectWorkspace'
   | 'runtimeFilter'
-  | 'workspaceHealthStatus'
   | 'workspaceStatus'
   | 'workspaceTrees'
   | 'workspaces'
@@ -706,7 +678,6 @@ function TreeGroup({
   draggedItemKey,
   expandedGroupIds,
   group,
-  healthByProjectId,
   onBeginPointerDrag,
   onConsumeSuppressedClick,
   onPointerTargetLeave,
@@ -721,8 +692,6 @@ function TreeGroup({
   workspaceIsActive,
 }: TreeGroupProps) {
   const runtimeStatus = groupRuntimeStatus(group, statusByProjectId)
-  const healthStatus = groupHealthStatus(group, healthByProjectId)
-  const supportsHealth = groupSupportsHealth(group)
   const groupDropTarget: NavigatorDropTarget = {
     id: group.id,
     name: group.name,
@@ -796,9 +765,6 @@ function TreeGroup({
           {workspaceIsActive ? (
             <div className="project-badges">
               <RuntimeStatusBadge status={runtimeStatus} variant="compact" />
-              {supportsHealth ? (
-                <HealthStatusBadge status={healthStatus} variant="compact" />
-              ) : null}
             </div>
           ) : null}
         </button>
@@ -833,7 +799,6 @@ function TreeGroup({
               draggedItemKey={draggedItemKey}
               expandedGroupIds={expandedGroupIds}
               group={childGroup}
-              healthByProjectId={healthByProjectId}
               key={childGroup.id}
               onBeginPointerDrag={onBeginPointerDrag}
               onConsumeSuppressedClick={onConsumeSuppressedClick}
@@ -852,8 +817,6 @@ function TreeGroup({
 
           {group.projects.map((project) => {
             const projectStatus: RuntimeStatus = statusByProjectId[project.id]?.status ?? 'STOPPED'
-            const projectHealth = projectHealthStatus(project, healthByProjectId[project.id])
-            const supportsHealth = projectSupportsHealth(project)
             const isSelectedProject =
               selectedItem?.type === 'project' && selectedItem.id === project.id
             const isDraggingCurrentProject = draggedItemKey === `project:${project.id}`
@@ -888,9 +851,6 @@ function TreeGroup({
                     {workspaceIsActive ? (
                       <div className="project-badges">
                         <RuntimeStatusBadge status={projectStatus} variant="compact" />
-                        {supportsHealth ? (
-                          <HealthStatusBadge status={projectHealth} variant="compact" />
-                        ) : null}
                       </div>
                     ) : null}
                   </button>
@@ -926,9 +886,7 @@ function TreeGroup({
 function filterGroups(
   groups: GroupTreeNode[],
   statusByProjectId: Record<string, ProcessRuntimeState>,
-  healthByProjectId: Record<string, ProjectHealthState>,
   runtimeFilter: RuntimeStatus | 'ALL',
-  healthFilter: HealthStatus | 'ALL',
   applyFilters: boolean,
 ): GroupTreeNode[] {
   return groups
@@ -936,21 +894,15 @@ function filterGroups(
       const projects = applyFilters
         ? group.projects.filter((project) => {
             const runtimeStatus = statusByProjectId[project.id]?.status ?? 'STOPPED'
-            const healthStatus = projectHealthStatus(project, healthByProjectId[project.id])
 
-            return (
-              (runtimeFilter === 'ALL' || runtimeStatus === runtimeFilter) &&
-              (healthFilter === 'ALL' || healthStatus === healthFilter)
-            )
+            return runtimeFilter === 'ALL' || runtimeStatus === runtimeFilter
           })
         : group.projects
 
       const children = filterGroups(
         group.groups,
         statusByProjectId,
-        healthByProjectId,
         runtimeFilter,
-        healthFilter,
         applyFilters,
       )
 

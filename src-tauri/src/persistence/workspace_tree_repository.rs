@@ -165,7 +165,6 @@ mod tests {
             detection_confidence: None,
             detection_evidence: None,
             warnings: None,
-            health_check: None,
             created_at: "2026-04-14T09:00:00Z".into(),
             updated_at: "2026-04-14T09:00:00Z".into(),
         };
@@ -186,7 +185,6 @@ mod tests {
             detection_confidence: None,
             detection_evidence: None,
             warnings: None,
-            health_check: None,
             created_at: "2026-04-14T09:00:00Z".into(),
             updated_at: "2026-04-14T09:00:00Z".into(),
         };

@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::models::{
     CommandArgs, DetectedProjectType, DetectionEvidence, DetectionWarning, EntityId,
-    EnvironmentVariables, HealthCheckConfig, IsoDateTime, ProjectPackageManager,
+    EnvironmentVariables, IsoDateTime, ProjectPackageManager,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -31,8 +31,6 @@ pub struct ProjectNode {
     pub detection_evidence: Option<Vec<DetectionEvidence>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub warnings: Option<Vec<DetectionWarning>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub health_check: Option<HealthCheckConfig>,
     pub created_at: IsoDateTime,
     pub updated_at: IsoDateTime,
 }
@@ -44,7 +42,7 @@ mod tests {
     use super::ProjectNode;
     use crate::models::{
         DetectedProjectType, DetectionEvidence, DetectionEvidenceKind, DetectionWarning,
-        HealthCheckConfig, HttpHealthCheckConfig, ProjectPackageManager,
+        ProjectPackageManager,
     };
 
     #[test]
@@ -78,19 +76,6 @@ mod tests {
                 message: "Command should be reviewed before saving".into(),
                 source: None,
             }]),
-            health_check: Some(HealthCheckConfig::Http(HttpHealthCheckConfig {
-                enabled: true,
-                interval_ms: 5_000,
-                timeout_ms: 2_000,
-                grace_period_ms: 3_000,
-                success_threshold: 1,
-                failure_threshold: 2,
-                url: "http://127.0.0.1:1420/health".into(),
-                method: "GET".into(),
-                expected_status_codes: vec![200],
-                headers: None,
-                contains_text: None,
-            })),
             created_at: "2026-04-14T09:00:00Z".into(),
             updated_at: "2026-04-14T09:00:00Z".into(),
         };
@@ -102,7 +87,6 @@ mod tests {
         assert_eq!(decoded, project);
         assert_eq!(json["detectedType"], "vite");
         assert_eq!(json["packageManager"], "npm");
-        assert_eq!(json["healthCheck"]["type"], "http");
         assert_eq!(json["args"][0], "--host");
     }
 
@@ -123,7 +107,6 @@ mod tests {
       "detectionConfidence": null,
       "detectionEvidence": null,
       "warnings": null,
-      "healthCheck": null,
       "createdAt": "2026-04-14T09:00:00Z",
       "updatedAt": "2026-04-14T09:00:00Z"
     }"#;
@@ -135,6 +118,5 @@ mod tests {
         assert!(project.env.is_none());
         assert!(project.package_manager.is_none());
         assert!(project.detection_evidence.is_none());
-        assert!(project.health_check.is_none());
     }
 }

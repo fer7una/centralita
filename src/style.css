@@ -1915,14 +1915,6 @@ textarea {
   overflow-wrap: anywhere;
 }
 
-/* Health tiles grid (compact 2-col) */
-
-.health-tile-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
 /* ==========================================================================
    Status badges (semantic, theme-aware via tokens)
    ========================================================================== */
@@ -1936,8 +1928,7 @@ textarea {
   max-width: 100%;
 }
 
-.runtime-badge,
-.health-badge {
+.runtime-badge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1952,8 +1943,7 @@ textarea {
   border: 1px solid transparent;
 }
 
-.runtime-badge-compact,
-.health-badge-compact {
+.runtime-badge-compact {
   width: 12px;
   min-width: 12px;
   height: 12px;
@@ -1965,8 +1955,7 @@ textarea {
   border: 1px solid var(--border-subtle);
 }
 
-.navigator-row.selected .runtime-badge-compact,
-.navigator-row.selected .health-badge-compact {
+.navigator-row.selected .runtime-badge-compact {
   border-color: var(--text-on-inverse);
 }
 
@@ -1995,31 +1984,6 @@ textarea {
   color: var(--state-error-fg);
 }
 
-.health-unsupported {
-  background: var(--state-idle-bg);
-  color: var(--state-idle-fg);
-}
-
-.health-unknown {
-  background: var(--state-info-bg);
-  color: var(--state-info-fg);
-}
-
-.health-checking {
-  background: var(--state-warning-bg);
-  color: var(--state-warning-fg);
-}
-
-.health-healthy {
-  background: var(--state-running-bg);
-  color: var(--state-running-fg);
-}
-
-.health-unhealthy {
-  background: var(--state-error-bg);
-  color: var(--state-error-fg);
-}
-
 .status-stopped.runtime-badge-compact {
   background: var(--state-idle-dot);
 }
@@ -2040,26 +2004,6 @@ textarea {
   background: var(--state-error-dot);
 }
 
-.health-unsupported.health-badge-compact {
-  background: var(--state-idle-dot);
-}
-
-.health-unknown.health-badge-compact {
-  background: var(--state-info-dot);
-}
-
-.health-checking.health-badge-compact {
-  background: var(--state-warning-dot);
-}
-
-.health-healthy.health-badge-compact {
-  background: var(--state-running-dot);
-}
-
-.health-unhealthy.health-badge-compact {
-  background: var(--state-error-dot);
-}
-
 .sr-only {
   position: absolute;
   width: 1px;
@@ -2070,27 +2014,6 @@ textarea {
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
-}
-
-/* ==========================================================================
-   Runtime panel layout (kept for ProjectRuntimePanel)
-   ========================================================================== */
-
-.runtime-panel {
-  display: grid;
-  gap: 16px;
-}
-
-.runtime-grid {
-  display: grid;
-  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
-  gap: 14px;
-}
-
-.observability-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
 }
 
 .checkbox-field {
@@ -2327,17 +2250,6 @@ textarea {
     grid-template-columns: 1fr;
   }
 
-  .runtime-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .observability-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .health-tile-grid {
-    grid-template-columns: 1fr;
-  }
 }
 
 @media (max-width: 720px) {

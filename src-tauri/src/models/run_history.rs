@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::models::{EntityId, HealthStatus, IsoDateTime, RuntimeStatus};
+use crate::models::{EntityId, IsoDateTime, RuntimeStatus};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -14,8 +14,6 @@ pub struct RunHistoryEntry {
     pub exit_code: Option<i32>,
     pub final_runtime_status: RuntimeStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub final_health_status: Option<HealthStatus>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stop_reason: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error_message: Option<String>,
@@ -25,7 +23,7 @@ pub struct RunHistoryEntry {
 #[cfg(test)]
 mod tests {
     use super::RunHistoryEntry;
-    use crate::models::{HealthStatus, RuntimeStatus};
+    use crate::models::RuntimeStatus;
 
     #[test]
     fn serializes_run_history_with_optional_metadata() {
@@ -36,7 +34,6 @@ mod tests {
             ended_at: Some("2026-04-17T09:05:00Z".into()),
             exit_code: Some(1),
             final_runtime_status: RuntimeStatus::Failed,
-            final_health_status: Some(HealthStatus::Unhealthy),
             stop_reason: Some("unexpected-exit".into()),
             error_message: Some("Port already in use".into()),
             command_preview: "npm run dev".into(),
@@ -45,7 +42,6 @@ mod tests {
         let json = serde_json::to_value(&entry).expect("run history should serialize");
 
         assert_eq!(json["finalRuntimeStatus"], "FAILED");
-        assert_eq!(json["finalHealthStatus"], "UNHEALTHY");
         assert_eq!(json["stopReason"], "unexpected-exit");
     }
 }

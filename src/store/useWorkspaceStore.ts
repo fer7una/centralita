@@ -377,7 +377,6 @@ export function useWorkspaceStore() {
           detectionConfidence: project.detectionConfidence,
           detectionEvidence: project.detectionEvidence,
           warnings: project.warnings,
-          healthCheck: project.healthCheck,
         })
       }
     }
@@ -454,7 +453,6 @@ export function useWorkspaceStore() {
         | 'env'
         | 'executable'
         | 'groupId'
-        | 'healthCheck'
         | 'name'
         | 'path'
         | 'workspaceId'
@@ -486,7 +484,6 @@ export function useWorkspaceStore() {
       detectionConfidence: project.detectionConfidence,
       detectionEvidence: project.detectionEvidence,
       warnings: project.warnings,
-      healthCheck: updates.healthCheck ?? project.healthCheck,
     })
     await loadWorkspaces(state.activeWorkspaceId)
   }

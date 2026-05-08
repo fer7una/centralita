@@ -16,14 +16,13 @@ use crate::{
         noop_runtime_event_emitter, RuntimeEventEmitter,
     },
     models::{
-        EntityId, HealthCheckConfig, ProcessRuntimeState, ProjectHealthState, ProjectNode,
-        RunRequest, RuntimeLogLine, RuntimeLogStream, RuntimeProcessErrorEvent,
-        RuntimeProcessExitedEvent, RuntimeStatus, RuntimeStatusEvent,
+        EntityId, ProcessRuntimeState, ProjectNode, RunRequest, RuntimeLogLine, RuntimeLogStream,
+        RuntimeProcessErrorEvent, RuntimeProcessExitedEvent, RuntimeStatus, RuntimeStatusEvent,
     },
     persistence::{AppDatabase, FinalizeRunHistoryInput, ProjectRepository},
     runtime::{
-        initial_process_state, stop_process_tree, HealthManager, HistoryRecorder, LogBuffer,
-        RuntimeError, RuntimeResult,
+        initial_process_state, stop_process_tree, HistoryRecorder, LogBuffer, RuntimeError,
+        RuntimeResult,
     },
     utils::timestamps,
 };
@@ -36,7 +35,6 @@ const LOG_READ_BUFFER_SIZE: usize = 4096;
 pub struct ProcessManager {
     processes: Arc<Mutex<HashMap<EntityId, ManagedProcess>>>,
     event_emitter: RuntimeEventEmitter,
-    health_manager: HealthManager,
     history_recorder: HistoryRecorder,
     log_buffer_limit: usize,
 }
@@ -45,7 +43,6 @@ pub struct ProcessManager {
 struct ManagedProcess {
     state: ProcessRuntimeState,
     child: Option<Arc<Mutex<Child>>>,
-    health_check: Option<HealthCheckConfig>,
     history_entry_id: Option<EntityId>,
     logs: LogBuffer,
 }
@@ -72,7 +69,6 @@ impl ProcessManager {
         Self {
             processes: Arc::new(Mutex::new(HashMap::new())),
             event_emitter: event_emitter.clone(),
-            health_manager: HealthManager::with_event_emitter(event_emitter.clone()),
             history_recorder: HistoryRecorder::new(database, event_emitter),
             log_buffer_limit: DEFAULT_LOG_BUFFER_LIMIT,
         }
@@ -86,7 +82,6 @@ impl ProcessManager {
         Self {
             processes: Arc::new(Mutex::new(HashMap::new())),
             event_emitter: event_emitter.clone(),
-            health_manager: HealthManager::with_event_emitter(event_emitter.clone()),
             history_recorder: HistoryRecorder::new(None, event_emitter),
             log_buffer_limit,
         }
@@ -152,7 +147,6 @@ impl ProcessManager {
                 ManagedProcess {
                     state: starting_state,
                     child: None,
-                    health_check: project.health_check.clone(),
                     history_entry_id: None,
                     logs: LogBuffer::new(self.log_buffer_limit),
                 },
@@ -209,7 +203,6 @@ impl ProcessManager {
                 ManagedProcess {
                     state: running_state.clone(),
                     child: Some(child_handle.clone()),
-                    health_check: project.health_check.clone(),
                     history_entry_id,
                     logs: LogBuffer::new(self.log_buffer_limit),
                 },
@@ -220,18 +213,6 @@ impl ProcessManager {
             &self.event_emitter,
             &status_event_from_state(&running_state, Some("Process started".into())),
         );
-
-        if let Some(config) = project
-            .health_check
-            .clone()
-            .filter(|config| config.enabled())
-        {
-            self.health_manager
-                .start_monitoring(project.id.clone(), config);
-        } else {
-            self.health_manager
-                .mark_process_stopped(&project.id, project.health_check.as_ref());
-        }
 
         if let Some(stdout) = stdout {
             spawn_log_pump(
@@ -256,7 +237,6 @@ impl ProcessManager {
         spawn_exit_monitor(
             self.processes.clone(),
             self.event_emitter.clone(),
-            self.health_manager.clone(),
             self.history_recorder.clone(),
             project.id.clone(),
             child_handle,
@@ -285,67 +265,9 @@ impl ProcessManager {
             .unwrap_or_else(|| stopped_state_for(project))
     }
 
-    pub fn project_health_state(&self, project: &ProjectNode) -> ProjectHealthState {
-        self.health_manager
-            .state_for_project(&project.id, project.health_check.as_ref())
-    }
-
-    pub fn project_health_states(&self, projects: &[ProjectNode]) -> Vec<ProjectHealthState> {
-        let configs = projects
-            .iter()
-            .map(|project| (project.id.clone(), project.health_check.clone()))
-            .collect::<HashMap<_, _>>();
-        let project_ids = projects
-            .iter()
-            .map(|project| project.id.clone())
-            .collect::<Vec<_>>();
-
-        self.health_manager
-            .states_for_projects(&project_ids, &configs)
-    }
-
-    pub fn refresh_project_health(
-        &self,
-        project: &ProjectNode,
-    ) -> RuntimeResult<ProjectHealthState> {
-        self.health_manager.refresh_now(
-            &project.id,
-            project.health_check.as_ref(),
-            self.is_project_running(&project.id),
-        )
-    }
-
-    pub fn update_project_health_check(&self, project: &ProjectNode) -> ProjectHealthState {
-        {
-            let mut processes = lock_mutex(&self.processes);
-            if let Some(process) = processes.get_mut(&project.id) {
-                process.health_check = project.health_check.clone();
-            }
-        }
-
-        if self.is_project_running(&project.id) {
-            if let Some(config) = project
-                .health_check
-                .clone()
-                .filter(|config| config.enabled())
-            {
-                self.health_manager
-                    .start_monitoring(project.id.clone(), config);
-            } else {
-                self.health_manager
-                    .mark_process_stopped(&project.id, project.health_check.as_ref());
-            }
-        } else {
-            self.health_manager
-                .mark_process_stopped(&project.id, project.health_check.as_ref());
-        }
-
-        self.project_health_state(project)
-    }
-
     pub fn stop_project(&self, project: &ProjectNode) -> RuntimeResult<ProcessRuntimeState> {
         let command_preview = command_preview_from_project(project);
-        let (child_handle, history_entry_id, health_check, previous_state) = {
+        let (child_handle, history_entry_id, previous_state) = {
             let mut processes = lock_mutex(&self.processes);
             let Some(process) = processes.get_mut(&project.id) else {
                 let stopped_state = stopped_state_for(project);
@@ -354,7 +276,6 @@ impl ProcessManager {
                     ManagedProcess {
                         state: stopped_state.clone(),
                         child: None,
-                        health_check: project.health_check.clone(),
                         history_entry_id: None,
                         logs: LogBuffer::new(self.log_buffer_limit),
                     },
@@ -379,7 +300,6 @@ impl ProcessManager {
             (
                 process.child.clone(),
                 process.history_entry_id.take(),
-                process.health_check.clone(),
                 previous_state,
             )
         };
@@ -422,8 +342,6 @@ impl ProcessManager {
 
         let stopped_at = now_iso_or_fallback();
         let exit_code = exit_status.as_ref().and_then(|status| status.code());
-        let last_health_status = self.health_manager.last_known_status(&project.id);
-        let mut finalized_by_stop = false;
         let final_state = {
             let mut processes = lock_mutex(&self.processes);
             let process = processes
@@ -431,7 +349,6 @@ impl ProcessManager {
                 .or_insert_with(|| ManagedProcess {
                     state: stopped_state_for(project),
                     child: None,
-                    health_check: project.health_check.clone(),
                     history_entry_id: None,
                     logs: LogBuffer::new(self.log_buffer_limit),
                 });
@@ -448,7 +365,6 @@ impl ProcessManager {
                     last_error: None,
                     ..stopped_state_for(project)
                 };
-                finalized_by_stop = true;
 
                 emit_status_changed(
                     &self.event_emitter,
@@ -470,7 +386,6 @@ impl ProcessManager {
                     ended_at: Some(stopped_at.clone()),
                     exit_code,
                     final_runtime_status: final_state.status,
-                    final_health_status: last_health_status,
                     stop_reason: Some("manual-stop".into()),
                     error_message: None,
                 },
@@ -482,18 +397,12 @@ impl ProcessManager {
             }
         }
 
-        if finalized_by_stop {
-            self.health_manager
-                .mark_process_stopped(&project.id, health_check.as_ref());
-        }
-
         Ok(final_state)
     }
 
     pub fn remove_project_runtime(&self, project: &ProjectNode) -> RuntimeResult<()> {
         self.stop_project(project)?;
         lock_mutex(&self.processes).remove(&project.id);
-        self.health_manager.clear_project(&project.id);
 
         Ok(())
     }
@@ -509,18 +418,16 @@ impl ProcessManager {
                             project_id.clone(),
                             child.clone(),
                             process.history_entry_id.clone(),
-                            process.health_check.clone(),
                         )
                     })
                 })
                 .collect::<Vec<_>>()
         };
 
-        for (project_id, child_handle, history_entry_id, health_check) in active_processes {
+        for (project_id, child_handle, history_entry_id) in active_processes {
             let exit_status = stop_process_tree(&child_handle).ok().flatten();
             let stopped_at = now_iso_or_fallback();
             let exit_code = exit_status.as_ref().and_then(|status| status.code());
-            let last_health_status = self.health_manager.last_known_status(&project_id);
 
             let final_state = {
                 let mut processes = lock_mutex(&self.processes);
@@ -567,7 +474,6 @@ impl ProcessManager {
                             ended_at: Some(stopped_at.clone()),
                             exit_code,
                             final_runtime_status: final_state.status,
-                            final_health_status: last_health_status,
                             stop_reason: Some("app-shutdown".into()),
                             error_message: None,
                         },
@@ -578,12 +484,8 @@ impl ProcessManager {
                         );
                     }
                 }
-                self.health_manager
-                    .mark_process_stopped(&project_id, health_check.as_ref());
             }
         }
-
-        self.health_manager.shutdown();
     }
 
     fn build_run_request(&self, project: &ProjectNode) -> RuntimeResult<RunRequest> {
@@ -654,7 +556,6 @@ impl ProcessManager {
             ManagedProcess {
                 state: failed_state.clone(),
                 child: None,
-                health_check: project.health_check.clone(),
                 history_entry_id: None,
                 logs: LogBuffer::new(self.log_buffer_limit),
             },
@@ -669,8 +570,6 @@ impl ProcessManager {
             &self.event_emitter,
             &error_event_from_state(&failed_state, last_error.to_owned()),
         );
-        self.health_manager
-            .mark_process_stopped(&project.id, project.health_check.as_ref());
         if let Err(error) = self.history_recorder.record_start_failure(
             project,
             command_preview,
@@ -684,12 +583,6 @@ impl ProcessManager {
         }
 
         failed_state
-    }
-
-    fn is_project_running(&self, project_id: &EntityId) -> bool {
-        lock_mutex(&self.processes)
-            .get(project_id)
-            .is_some_and(|process| process.state.status == RuntimeStatus::Running)
     }
 }
 
@@ -905,7 +798,6 @@ fn emit_log_chunk(
 fn spawn_exit_monitor(
     processes: Arc<Mutex<HashMap<EntityId, ManagedProcess>>>,
     event_emitter: RuntimeEventEmitter,
-    health_manager: HealthManager,
     history_recorder: HistoryRecorder,
     project_id: EntityId,
     child_handle: Arc<Mutex<Child>>,
@@ -918,7 +810,6 @@ fn spawn_exit_monitor(
 
         match exit_status {
             Ok(Some(status)) => {
-                let last_health_status = health_manager.last_known_status(&project_id);
                 let finalized = {
                     let mut processes = lock_mutex(&processes);
                     match processes.get_mut(&project_id) {
@@ -930,7 +821,6 @@ fn spawn_exit_monitor(
                         {
                             process.child = None;
                             let history_entry_id = process.history_entry_id.clone();
-                            let health_check = process.health_check.clone();
                             let was_stopping = process.state.status == RuntimeStatus::Stopping;
                             process.history_entry_id = None;
                             process.state.stopped_at = Some(now_iso_or_fallback());
@@ -971,7 +861,6 @@ fn spawn_exit_monitor(
                             Some((
                                 process.state.clone(),
                                 history_entry_id,
-                                health_check,
                                 process.state.last_error.clone(),
                             ))
                         }
@@ -979,9 +868,7 @@ fn spawn_exit_monitor(
                     }
                 };
 
-                if let Some((final_state, history_entry_id, health_check, error_message)) =
-                    finalized
-                {
+                if let Some((final_state, history_entry_id, error_message)) = finalized {
                     if let Some(run_history_id) = history_entry_id {
                         if let Err(error) = history_recorder.finalize_run(
                             &run_history_id,
@@ -994,7 +881,6 @@ fn spawn_exit_monitor(
                                 ),
                                 exit_code: final_state.exit_code,
                                 final_runtime_status: final_state.status,
-                                final_health_status: last_health_status,
                                 stop_reason: Some(
                                     if final_state.status == RuntimeStatus::Stopped {
                                         if status.success() {
@@ -1015,14 +901,12 @@ fn spawn_exit_monitor(
                             );
                         }
                     }
-                    health_manager.mark_process_stopped(&project_id, health_check.as_ref());
                 }
 
                 break;
             }
             Ok(None) => thread::sleep(EXIT_POLL_INTERVAL),
             Err(error) => {
-                let last_health_status = health_manager.last_known_status(&project_id);
                 let finalized =
                     {
                         let mut processes = lock_mutex(&processes);
@@ -1035,7 +919,6 @@ fn spawn_exit_monitor(
                             {
                                 process.child = None;
                                 let history_entry_id = process.history_entry_id.clone();
-                                let health_check = process.health_check.clone();
                                 process.history_entry_id = None;
                                 process.state.status = RuntimeStatus::Failed;
                                 process.state.stopped_at = Some(now_iso_or_fallback());
@@ -1062,7 +945,6 @@ fn spawn_exit_monitor(
                                 Some((
                                     process.state.clone(),
                                     history_entry_id,
-                                    health_check,
                                     process.state.last_error.clone(),
                                 ))
                             }
@@ -1070,9 +952,7 @@ fn spawn_exit_monitor(
                         }
                     };
 
-                if let Some((final_state, history_entry_id, health_check, error_message)) =
-                    finalized
-                {
+                if let Some((final_state, history_entry_id, error_message)) = finalized {
                     if let Some(run_history_id) = history_entry_id {
                         if let Err(history_error) = history_recorder.finalize_run(
                             &run_history_id,
@@ -1085,7 +965,6 @@ fn spawn_exit_monitor(
                                 ),
                                 exit_code: final_state.exit_code,
                                 final_runtime_status: RuntimeStatus::Failed,
-                                final_health_status: last_health_status,
                                 stop_reason: Some("monitor-error".into()),
                                 error_message,
                             },
@@ -1096,7 +975,6 @@ fn spawn_exit_monitor(
                             );
                         }
                     }
-                    health_manager.mark_process_stopped(&project_id, health_check.as_ref());
                 }
 
                 break;
@@ -1341,7 +1219,6 @@ mod tests {
                 ManagedProcess {
                     state,
                     child: Some(child_handle.clone()),
-                    health_check: None,
                     history_entry_id: None,
                     logs: LogBuffer::new(10),
                 },
@@ -1351,7 +1228,6 @@ mod tests {
         super::spawn_exit_monitor(
             manager.processes.clone(),
             manager.event_emitter.clone(),
-            manager.health_manager.clone(),
             manager.history_recorder.clone(),
             project.id.clone(),
             child_handle,
@@ -1422,7 +1298,6 @@ mod tests {
                 ManagedProcess {
                     state: crate::runtime::initial_process_state(project.id.clone(), "test"),
                     child: None,
-                    health_check: None,
                     history_entry_id: None,
                     logs: LogBuffer::new(100),
                 },
@@ -1468,7 +1343,6 @@ mod tests {
                 ManagedProcess {
                     state: crate::runtime::initial_process_state(project.id.clone(), "test"),
                     child: None,
-                    health_check: None,
                     history_entry_id: None,
                     logs: LogBuffer::new(100),
                 },
@@ -1613,7 +1487,6 @@ mod tests {
                 ManagedProcess {
                     state: crate::runtime::initial_process_state(project.id.clone(), "npm start"),
                     child: None,
-                    health_check: None,
                     history_entry_id: None,
                     logs: existing_logs,
                 },
@@ -1649,7 +1522,6 @@ mod tests {
                 ManagedProcess {
                     state: failed_state.clone(),
                     child: None,
-                    health_check: None,
                     history_entry_id: None,
                     logs: LogBuffer::new(10),
                 },
@@ -1819,7 +1691,6 @@ mod tests {
             detection_confidence: None,
             detection_evidence: None,
             warnings: None,
-            health_check: None,
             created_at: "2026-04-16T10:00:00Z".into(),
             updated_at: "2026-04-16T10:00:00Z".into(),
         }

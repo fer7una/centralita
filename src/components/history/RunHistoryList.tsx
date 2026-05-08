@@ -27,7 +27,6 @@ export function RunHistoryList({ entries }: RunHistoryListProps) {
           </span>
           <span>
             Runtime final: {entry.finalRuntimeStatus}
-            {entry.finalHealthStatus ? ` · Health: ${entry.finalHealthStatus}` : ''}
             {entry.exitCode !== null && entry.exitCode !== undefined ? ` · Exit: ${entry.exitCode}` : ''}
           </span>
           <span>

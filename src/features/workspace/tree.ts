@@ -1,8 +1,6 @@
 import type {
   GroupTreeNode,
-  HealthStatus,
   ProcessRuntimeState,
-  ProjectHealthState,
   ProjectNode,
   RuntimeStatus,
 } from '../../types'
@@ -96,59 +94,6 @@ export function aggregateRuntimeStatus(statuses: RuntimeStatus[]): RuntimeStatus
   return 'STOPPED'
 }
 
-export function projectHealthStatus(project: ProjectNode, healthState?: ProjectHealthState | null): HealthStatus {
-  if (healthState) {
-    return healthState.status
-  }
-
-  return project.healthCheck?.enabled ? 'UNKNOWN' : 'UNSUPPORTED'
-}
-
-export function projectSupportsHealth(project: ProjectNode) {
-  return Boolean(project.healthCheck?.enabled)
-}
-
-export function groupSupportsHealth(group: GroupTreeNode): boolean {
-  return (
-    group.projects.some(projectSupportsHealth) ||
-    group.groups.some(groupSupportsHealth)
-  )
-}
-
-export function groupsSupportHealth(groups: GroupTreeNode[]) {
-  return groups.some(groupSupportsHealth)
-}
-
-export function aggregateHealthStatus(statuses: HealthStatus[]): HealthStatus {
-  if (statuses.length === 0) {
-    return 'UNSUPPORTED'
-  }
-  if (statuses.includes('UNHEALTHY')) {
-    return 'UNHEALTHY'
-  }
-  if (statuses.includes('CHECKING')) {
-    return 'CHECKING'
-  }
-  if (statuses.includes('HEALTHY')) {
-    return 'HEALTHY'
-  }
-  if (statuses.includes('UNKNOWN')) {
-    return 'UNKNOWN'
-  }
-
-  return 'UNSUPPORTED'
-}
-
-export function countHealthStatuses(statuses: HealthStatus[]) {
-  return {
-    checking: statuses.filter((status) => status === 'CHECKING').length,
-    healthy: statuses.filter((status) => status === 'HEALTHY').length,
-    unhealthy: statuses.filter((status) => status === 'UNHEALTHY').length,
-    unknown: statuses.filter((status) => status === 'UNKNOWN').length,
-    unsupported: statuses.filter((status) => status === 'UNSUPPORTED').length,
-  }
-}
-
 export function groupRuntimeStatus(
   group: GroupTreeNode,
   statusByProjectId: Record<string, ProcessRuntimeState>,
@@ -159,16 +104,4 @@ export function groupRuntimeStatus(
   )
 
   return aggregateRuntimeStatus(statuses)
-}
-
-export function groupHealthStatus(
-  group: GroupTreeNode,
-  healthByProjectId: Record<string, ProjectHealthState>,
-): HealthStatus {
-  const descendantProjects = [...group.projects, ...flattenProjects(group.groups)]
-  const statuses = descendantProjects.map((project) =>
-    projectHealthStatus(project, healthByProjectId[project.id]),
-  )
-
-  return aggregateHealthStatus(statuses)
 }

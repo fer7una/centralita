@@ -8,33 +8,22 @@ import {
   type SetStateAction,
 } from 'react'
 import {
-  getProjectHealthStatus,
   getProjectLogs,
   getWorkspaceRuntimeStatus,
   listProjectRunHistory,
   restartProject,
-  refreshProjectHealth,
   startGroup,
   startProject,
   startWorkspace,
   stopGroup,
   stopProject,
   stopWorkspace,
-  updateProjectHealthCheck,
 } from '../features/runtime/api'
+import { aggregateRuntimeStatus, flattenProjects } from '../features/workspace/tree'
 import { listenRuntimeEvent, RUNTIME_EVENTS } from '../shared/api/tauri'
-import {
-  aggregateHealthStatus,
-  aggregateRuntimeStatus,
-  countHealthStatuses,
-  flattenProjects,
-} from '../features/workspace/tree'
 import type {
   GroupTreeNode,
-  HealthCheckConfig,
-  HealthStatus,
   ProcessRuntimeState,
-  ProjectHealthState,
   RunHistoryEntry,
   RuntimeLogLine,
   RuntimeProcessErrorEvent,
@@ -47,12 +36,9 @@ const MAX_LOG_LINES = 500
 const HISTORY_LIMIT = 10
 
 export type RuntimeFilter = RuntimeStatus | 'ALL'
-export type HealthFilter = HealthStatus | 'ALL'
 
 type RuntimeState = {
   error: string | null
-  healthByProjectId: Record<string, ProjectHealthState>
-  healthFilter: HealthFilter
   historyByProjectId: Record<string, RunHistoryEntry[]>
   logsByProjectId: Record<string, RuntimeLogLine[]>
   runtimeFilter: RuntimeFilter
@@ -62,8 +48,6 @@ type RuntimeState = {
 
 const initialState: RuntimeState = {
   error: null,
-  healthByProjectId: {},
-  healthFilter: 'ALL',
   historyByProjectId: {},
   logsByProjectId: {},
   runtimeFilter: 'ALL',
@@ -117,12 +101,6 @@ function indexStates(projects: ProcessRuntimeState[]) {
   )
 }
 
-function indexHealthStates(projects: ProjectHealthState[]) {
-  return Object.fromEntries(
-    projects.map((project) => [project.projectId, project]),
-  )
-}
-
 function isActiveRuntimeStatus(status: RuntimeStatus) {
   return status === 'STARTING' || status === 'RUNNING' || status === 'STOPPING'
 }
@@ -162,7 +140,6 @@ async function syncWorkspaceRuntimeState(
     startTransition(() =>
       setState((current) => ({
         ...initialState,
-        healthFilter: current.healthFilter,
         runtimeFilter: current.runtimeFilter,
       })),
     )
@@ -173,9 +150,6 @@ async function syncWorkspaceRuntimeState(
     const workspaceRuntime = await getWorkspaceRuntimeStatus({
       workspaceId: activeWorkspaceId,
     })
-    const healthStates = await Promise.all(
-      projectIds.map((projectId) => getProjectHealthStatus({ projectId })),
-    )
 
     startTransition(() => {
       setState((current) => ({
@@ -186,7 +160,6 @@ async function syncWorkspaceRuntimeState(
           projectIds.includes(current.selectedProjectId)
             ? current.selectedProjectId
             : (projectIds[0] ?? null),
-        healthByProjectId: indexHealthStates(healthStates),
         statusByProjectId: indexStates(workspaceRuntime.projects),
       }))
     })
@@ -405,18 +378,6 @@ export function useRuntimeStore(
     },
   )
 
-  const handleHealthChanged = useEffectEvent((payload: ProjectHealthState) => {
-    startTransition(() => {
-      setState((current) => ({
-        ...current,
-        healthByProjectId: {
-          ...current.healthByProjectId,
-          [payload.projectId]: payload,
-        },
-      }))
-    })
-  })
-
   const handleHistoryAppended = useEffectEvent((payload: RunHistoryEntry) => {
     startTransition(() => {
       setState((current) => ({
@@ -456,7 +417,6 @@ export function useRuntimeStore(
       startTransition(() =>
         setState((current) => ({
           ...initialState,
-          healthFilter: current.healthFilter,
           runtimeFilter: current.runtimeFilter,
         })),
       )
@@ -468,9 +428,6 @@ export function useRuntimeStore(
         const workspaceRuntime = await getWorkspaceRuntimeStatus({
           workspaceId: activeWorkspaceId,
         })
-        const healthStates = await Promise.all(
-          projectIds.map((projectId) => getProjectHealthStatus({ projectId })),
-        )
 
         startTransition(() => {
           setState((current) => {
@@ -486,7 +443,6 @@ export function useRuntimeStore(
                 projectIds.includes(current.selectedProjectId)
                   ? current.selectedProjectId
                   : (projectIds[0] ?? null),
-              healthByProjectId: indexHealthStates(healthStates),
               statusByProjectId: indexStates(workspaceRuntime.projects),
             }
           })
@@ -537,9 +493,6 @@ export function useRuntimeStore(
       listenRuntimeEvent(RUNTIME_EVENTS.processError, (payload) =>
         handleProcessError(payload),
       ),
-      listenRuntimeEvent(RUNTIME_EVENTS.healthChanged, (payload) =>
-        handleHealthChanged(payload),
-      ),
       listenRuntimeEvent(RUNTIME_EVENTS.historyAppended, (payload) =>
         handleHistoryAppended(payload),
       ),
@@ -565,26 +518,15 @@ export function useRuntimeStore(
   const runtimeStatuses = projects.map(
     (project) => state.statusByProjectId[project.id]?.status ?? 'STOPPED',
   )
-  const healthStatuses = projects.map(
-    (project) =>
-      state.healthByProjectId[project.id]?.status ??
-      (project.healthCheck?.enabled ? 'UNKNOWN' : 'UNSUPPORTED'),
-  )
   const workspaceStatus: RuntimeStatus = aggregateRuntimeStatus(runtimeStatuses)
-  const workspaceHealthStatus: HealthStatus =
-    aggregateHealthStatus(healthStatuses)
 
   return {
     error: state.error,
-    healthByProjectId: state.healthByProjectId,
-    healthCounts: countHealthStatuses(healthStatuses),
-    healthFilter: state.healthFilter,
     historyByProjectId: state.historyByProjectId,
     logsByProjectId: state.logsByProjectId,
     runtimeFilter: state.runtimeFilter,
     selectedProjectId: state.selectedProjectId,
     statusByProjectId: state.statusByProjectId,
-    workspaceHealthStatus,
     workspaceStatus,
     actions: {
       clearSavedProjectRuntimeSnapshot: (projectId: string) =>
@@ -604,16 +546,12 @@ export function useRuntimeStore(
           },
         }))
       },
-      refreshProjectHealth: (projectId: string) =>
-        refreshProjectHealth({ projectId }),
       selectProject: (projectId: string) =>
         setState((current) =>
           current.selectedProjectId === projectId
             ? current
             : { ...current, selectedProjectId: projectId },
         ),
-      setHealthFilter: (healthFilter: HealthFilter) =>
-        setState((current) => ({ ...current, healthFilter })),
       setRuntimeFilter: (runtimeFilter: RuntimeFilter) =>
         setState((current) => ({ ...current, runtimeFilter })),
       startGroup: (groupId: string) => startGroup({ groupId }),
@@ -636,10 +574,6 @@ export function useRuntimeStore(
           setState,
         )
       },
-      updateProjectHealthCheck: (
-        projectId: string,
-        healthCheck: HealthCheckConfig | null,
-      ) => updateProjectHealthCheck({ projectId, healthCheck }),
       restartProject: (projectId: string) => {
         setState((current) =>
           clearSavedProjectRuntimeSnapshot(current, projectId),

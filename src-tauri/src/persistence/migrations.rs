@@ -119,15 +119,6 @@ fn migration_v2(transaction: &Transaction<'_>) -> PersistenceResult<()> {
 fn migration_v3(transaction: &Transaction<'_>) -> PersistenceResult<()> {
     transaction.execute_batch(
         r#"
-      ALTER TABLE projects ADD COLUMN healthcheck_type TEXT NULL;
-      ALTER TABLE projects ADD COLUMN healthcheck_enabled INTEGER NULL;
-      ALTER TABLE projects ADD COLUMN healthcheck_interval_ms INTEGER NULL;
-      ALTER TABLE projects ADD COLUMN healthcheck_timeout_ms INTEGER NULL;
-      ALTER TABLE projects ADD COLUMN healthcheck_grace_period_ms INTEGER NULL;
-      ALTER TABLE projects ADD COLUMN healthcheck_success_threshold INTEGER NULL;
-      ALTER TABLE projects ADD COLUMN healthcheck_failure_threshold INTEGER NULL;
-      ALTER TABLE projects ADD COLUMN healthcheck_payload_json TEXT NULL;
-
       CREATE TABLE IF NOT EXISTS run_history (
         id TEXT PRIMARY KEY,
         project_id TEXT NOT NULL,
@@ -135,7 +126,6 @@ fn migration_v3(transaction: &Transaction<'_>) -> PersistenceResult<()> {
         ended_at TEXT NULL,
         exit_code INTEGER NULL,
         final_runtime_status TEXT NOT NULL,
-        final_health_status TEXT NULL,
         stop_reason TEXT NULL,
         error_message TEXT NULL,
         command_preview TEXT NOT NULL,
@@ -288,7 +278,6 @@ mod tests {
 
         apply_all(&mut connection).expect("all migrations should apply");
 
-        let healthcheck_type_exists = column_exists(&connection, "projects", "healthcheck_type");
         let run_history_exists = table_exists(&connection, "run_history");
         let project_name: String = connection
             .query_row(
@@ -298,7 +287,6 @@ mod tests {
             )
             .expect("existing project should remain");
 
-        assert!(healthcheck_type_exists);
         assert!(run_history_exists);
         assert_eq!(project_name, "API");
     }
@@ -548,15 +536,7 @@ mod tests {
             executable TEXT NULL,
             detection_confidence REAL NULL,
             detection_evidence_json TEXT NULL,
-            warnings_json TEXT NULL,
-            healthcheck_type TEXT NULL,
-            healthcheck_enabled INTEGER NULL,
-            healthcheck_interval_ms INTEGER NULL,
-            healthcheck_timeout_ms INTEGER NULL,
-            healthcheck_grace_period_ms INTEGER NULL,
-            healthcheck_success_threshold INTEGER NULL,
-            healthcheck_failure_threshold INTEGER NULL,
-            healthcheck_payload_json TEXT NULL
+            warnings_json TEXT NULL
           );
           CREATE TABLE run_history (
             id TEXT PRIMARY KEY,
@@ -565,7 +545,6 @@ mod tests {
             ended_at TEXT NULL,
             exit_code INTEGER NULL,
             final_runtime_status TEXT NOT NULL,
-            final_health_status TEXT NULL,
             stop_reason TEXT NULL,
             error_message TEXT NULL,
             command_preview TEXT NOT NULL
@@ -598,15 +577,7 @@ mod tests {
             executable,
             detection_confidence,
             detection_evidence_json,
-            warnings_json,
-            healthcheck_type,
-            healthcheck_enabled,
-            healthcheck_interval_ms,
-            healthcheck_timeout_ms,
-            healthcheck_grace_period_ms,
-            healthcheck_success_threshold,
-            healthcheck_failure_threshold,
-            healthcheck_payload_json
+            warnings_json
           )
           VALUES (
             'project-frontend',
@@ -624,14 +595,6 @@ mod tests {
             '2026-04-17T10:00:00Z',
             'npm',
             'npm',
-            NULL,
-            NULL,
-            NULL,
-            NULL,
-            NULL,
-            NULL,
-            NULL,
-            NULL,
             NULL,
             NULL,
             NULL
@@ -683,15 +646,7 @@ mod tests {
             executable TEXT NULL,
             detection_confidence REAL NULL,
             detection_evidence_json TEXT NULL,
-            warnings_json TEXT NULL,
-            healthcheck_type TEXT NULL,
-            healthcheck_enabled INTEGER NULL,
-            healthcheck_interval_ms INTEGER NULL,
-            healthcheck_timeout_ms INTEGER NULL,
-            healthcheck_grace_period_ms INTEGER NULL,
-            healthcheck_success_threshold INTEGER NULL,
-            healthcheck_failure_threshold INTEGER NULL,
-            healthcheck_payload_json TEXT NULL
+            warnings_json TEXT NULL
           );
           CREATE TABLE run_history (
             id TEXT PRIMARY KEY,
@@ -700,7 +655,6 @@ mod tests {
             ended_at TEXT NULL,
             exit_code INTEGER NULL,
             final_runtime_status TEXT NOT NULL,
-            final_health_status TEXT NULL,
             stop_reason TEXT NULL,
             error_message TEXT NULL,
             command_preview TEXT NOT NULL
@@ -733,20 +687,5 @@ mod tests {
             )
             .expect("sqlite_master should be readable")
             == 1
-    }
-
-    fn column_exists(connection: &Connection, table_name: &str, column_name: &str) -> bool {
-        let mut statement = connection
-            .prepare(&format!("PRAGMA table_info({table_name})"))
-            .expect("pragma statement should prepare");
-        let exists = {
-            let rows = statement
-                .query_map([], |row| row.get::<_, String>(1))
-                .expect("pragma rows should load");
-
-            rows.flatten().any(|name| name == column_name)
-        };
-
-        exists
     }
 }

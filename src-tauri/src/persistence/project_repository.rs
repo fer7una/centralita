@@ -1,10 +1,7 @@
 use rusqlite::{params, OptionalExtension};
 
 use crate::{
-    models::{
-        DetectedProjectType, EntityId, HealthCheckConfig, HealthCheckKind, HttpHealthCheckConfig,
-        ProjectNode, ProjectPackageManager, TcpHealthCheckConfig,
-    },
+    models::{DetectedProjectType, EntityId, ProjectNode, ProjectPackageManager},
     persistence::{AppDatabase, PersistenceResult},
 };
 
@@ -40,20 +37,12 @@ impl ProjectRepository {
           detection_confidence,
           detection_evidence_json,
           warnings_json,
-          healthcheck_type,
-          healthcheck_enabled,
-          healthcheck_interval_ms,
-          healthcheck_timeout_ms,
-          healthcheck_grace_period_ms,
-          healthcheck_success_threshold,
-          healthcheck_failure_threshold,
-          healthcheck_payload_json,
           created_at,
           updated_at
         )
         VALUES (
           ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-          ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26
+          ?17, ?18
         )
       "#,
             params![
@@ -73,14 +62,6 @@ impl ProjectRepository {
                 project.detection_confidence,
                 serialize_json_option(&project.detection_evidence)?,
                 serialize_json_option(&project.warnings)?,
-                serialize_health_check_type(&project.health_check)?,
-                healthcheck_enabled(&project.health_check),
-                healthcheck_interval_ms(&project.health_check),
-                healthcheck_timeout_ms(&project.health_check),
-                healthcheck_grace_period_ms(&project.health_check),
-                healthcheck_success_threshold(&project.health_check),
-                healthcheck_failure_threshold(&project.health_check),
-                serialize_json_option(&project.health_check)?,
                 project.created_at,
                 project.updated_at
             ],
@@ -113,14 +94,6 @@ impl ProjectRepository {
           detection_confidence,
           detection_evidence_json,
           warnings_json,
-          healthcheck_type,
-          healthcheck_enabled,
-          healthcheck_interval_ms,
-          healthcheck_timeout_ms,
-          healthcheck_grace_period_ms,
-          healthcheck_success_threshold,
-          healthcheck_failure_threshold,
-          healthcheck_payload_json,
           created_at,
           updated_at
         FROM projects
@@ -147,16 +120,8 @@ impl ProjectRepository {
                 detection_confidence: row.get(13)?,
                 detection_evidence_json: row.get(14)?,
                 warnings_json: row.get(15)?,
-                healthcheck_type: row.get(16)?,
-                healthcheck_enabled: row.get(17)?,
-                healthcheck_interval_ms: row.get(18)?,
-                healthcheck_timeout_ms: row.get(19)?,
-                healthcheck_grace_period_ms: row.get(20)?,
-                healthcheck_success_threshold: row.get(21)?,
-                healthcheck_failure_threshold: row.get(22)?,
-                healthcheck_payload_json: row.get(23)?,
-                created_at: row.get(24)?,
-                updated_at: row.get(25)?,
+                created_at: row.get(16)?,
+                updated_at: row.get(17)?,
             })
         })?;
 
@@ -186,14 +151,6 @@ impl ProjectRepository {
             detection_confidence,
             detection_evidence_json,
             warnings_json,
-            healthcheck_type,
-            healthcheck_enabled,
-            healthcheck_interval_ms,
-            healthcheck_timeout_ms,
-            healthcheck_grace_period_ms,
-            healthcheck_success_threshold,
-            healthcheck_failure_threshold,
-            healthcheck_payload_json,
             created_at,
             updated_at
           FROM projects
@@ -218,16 +175,8 @@ impl ProjectRepository {
                         detection_confidence: row.get(13)?,
                         detection_evidence_json: row.get(14)?,
                         warnings_json: row.get(15)?,
-                        healthcheck_type: row.get(16)?,
-                        healthcheck_enabled: row.get(17)?,
-                        healthcheck_interval_ms: row.get(18)?,
-                        healthcheck_timeout_ms: row.get(19)?,
-                        healthcheck_grace_period_ms: row.get(20)?,
-                        healthcheck_success_threshold: row.get(21)?,
-                        healthcheck_failure_threshold: row.get(22)?,
-                        healthcheck_payload_json: row.get(23)?,
-                        created_at: row.get(24)?,
-                        updated_at: row.get(25)?,
+                        created_at: row.get(16)?,
+                        updated_at: row.get(17)?,
                     })
                 },
             )
@@ -257,16 +206,8 @@ impl ProjectRepository {
           detection_confidence = ?14,
           detection_evidence_json = ?15,
           warnings_json = ?16,
-          healthcheck_type = ?17,
-          healthcheck_enabled = ?18,
-          healthcheck_interval_ms = ?19,
-          healthcheck_timeout_ms = ?20,
-          healthcheck_grace_period_ms = ?21,
-          healthcheck_success_threshold = ?22,
-          healthcheck_failure_threshold = ?23,
-          healthcheck_payload_json = ?24,
-          created_at = ?25,
-          updated_at = ?26
+          created_at = ?17,
+          updated_at = ?18
         WHERE id = ?1
       "#,
             params![
@@ -286,55 +227,8 @@ impl ProjectRepository {
                 project.detection_confidence,
                 serialize_json_option(&project.detection_evidence)?,
                 serialize_json_option(&project.warnings)?,
-                serialize_health_check_type(&project.health_check)?,
-                healthcheck_enabled(&project.health_check),
-                healthcheck_interval_ms(&project.health_check),
-                healthcheck_timeout_ms(&project.health_check),
-                healthcheck_grace_period_ms(&project.health_check),
-                healthcheck_success_threshold(&project.health_check),
-                healthcheck_failure_threshold(&project.health_check),
-                serialize_json_option(&project.health_check)?,
                 project.created_at,
                 project.updated_at
-            ],
-        )?;
-
-        Ok(updated_rows > 0)
-    }
-
-    pub fn update_health_check(
-        &self,
-        project_id: &EntityId,
-        health_check: &Option<HealthCheckConfig>,
-        updated_at: &str,
-    ) -> PersistenceResult<bool> {
-        let connection = self.database.connect()?;
-        let updated_rows = connection.execute(
-            r#"
-        UPDATE projects
-        SET
-          healthcheck_type = ?2,
-          healthcheck_enabled = ?3,
-          healthcheck_interval_ms = ?4,
-          healthcheck_timeout_ms = ?5,
-          healthcheck_grace_period_ms = ?6,
-          healthcheck_success_threshold = ?7,
-          healthcheck_failure_threshold = ?8,
-          healthcheck_payload_json = ?9,
-          updated_at = ?10
-        WHERE id = ?1
-      "#,
-            params![
-                project_id,
-                serialize_health_check_type(health_check)?,
-                healthcheck_enabled(health_check),
-                healthcheck_interval_ms(health_check),
-                healthcheck_timeout_ms(health_check),
-                healthcheck_grace_period_ms(health_check),
-                healthcheck_success_threshold(health_check),
-                healthcheck_failure_threshold(health_check),
-                serialize_json_option(health_check)?,
-                updated_at
             ],
         )?;
 
@@ -368,14 +262,6 @@ struct ProjectRecord {
     detection_confidence: Option<f64>,
     detection_evidence_json: Option<String>,
     warnings_json: Option<String>,
-    healthcheck_type: Option<String>,
-    healthcheck_enabled: Option<i64>,
-    healthcheck_interval_ms: Option<i64>,
-    healthcheck_timeout_ms: Option<i64>,
-    healthcheck_grace_period_ms: Option<i64>,
-    healthcheck_success_threshold: Option<i64>,
-    healthcheck_failure_threshold: Option<i64>,
-    healthcheck_payload_json: Option<String>,
     created_at: String,
     updated_at: String,
 }
@@ -401,16 +287,6 @@ impl TryFrom<ProjectRecord> for ProjectNode {
             detection_confidence: record.detection_confidence,
             detection_evidence: deserialize_json_option(record.detection_evidence_json)?,
             warnings: deserialize_json_option(record.warnings_json)?,
-            health_check: deserialize_health_check(
-                record.healthcheck_type,
-                record.healthcheck_enabled,
-                record.healthcheck_interval_ms,
-                record.healthcheck_timeout_ms,
-                record.healthcheck_grace_period_ms,
-                record.healthcheck_success_threshold,
-                record.healthcheck_failure_threshold,
-                record.healthcheck_payload_json,
-            )?,
             created_at: record.created_at,
             updated_at: record.updated_at,
         })
@@ -485,115 +361,6 @@ where
     }
 }
 
-fn serialize_health_check_type(
-    value: &Option<HealthCheckConfig>,
-) -> PersistenceResult<Option<String>> {
-    match value {
-        Some(value) => match serde_json::to_value(value.kind())? {
-            serde_json::Value::String(serialized) => Ok(Some(serialized)),
-            _ => Err(std::io::Error::other("health check type must serialize as string").into()),
-        },
-        None => Ok(None),
-    }
-}
-
-fn deserialize_health_check(
-    healthcheck_type: Option<String>,
-    healthcheck_enabled: Option<i64>,
-    healthcheck_interval_ms: Option<i64>,
-    healthcheck_timeout_ms: Option<i64>,
-    healthcheck_grace_period_ms: Option<i64>,
-    healthcheck_success_threshold: Option<i64>,
-    healthcheck_failure_threshold: Option<i64>,
-    healthcheck_payload_json: Option<String>,
-) -> PersistenceResult<Option<HealthCheckConfig>> {
-    let Some(healthcheck_type) = healthcheck_type else {
-        return Ok(None);
-    };
-    let kind: HealthCheckKind =
-        serde_json::from_value(serde_json::Value::String(healthcheck_type))?;
-    let payload = healthcheck_payload_json.ok_or_else(|| {
-        std::io::Error::other("health check payload is required when health check type is present")
-    })?;
-
-    match kind {
-        HealthCheckKind::Http => {
-            let mut config: HttpHealthCheckConfig = serde_json::from_str(&payload)?;
-            if let Some(enabled) = healthcheck_enabled {
-                config.enabled = enabled != 0;
-            }
-            if let Some(interval_ms) = healthcheck_interval_ms {
-                config.interval_ms = interval_ms as u64;
-            }
-            if let Some(timeout_ms) = healthcheck_timeout_ms {
-                config.timeout_ms = timeout_ms as u64;
-            }
-            if let Some(grace_period_ms) = healthcheck_grace_period_ms {
-                config.grace_period_ms = grace_period_ms as u64;
-            }
-            if let Some(success_threshold) = healthcheck_success_threshold {
-                config.success_threshold = success_threshold as u32;
-            }
-            if let Some(failure_threshold) = healthcheck_failure_threshold {
-                config.failure_threshold = failure_threshold as u32;
-            }
-
-            Ok(Some(HealthCheckConfig::Http(config).normalized()))
-        }
-        HealthCheckKind::Tcp => {
-            let mut config: TcpHealthCheckConfig = serde_json::from_str(&payload)?;
-            if let Some(enabled) = healthcheck_enabled {
-                config.enabled = enabled != 0;
-            }
-            if let Some(interval_ms) = healthcheck_interval_ms {
-                config.interval_ms = interval_ms as u64;
-            }
-            if let Some(timeout_ms) = healthcheck_timeout_ms {
-                config.timeout_ms = timeout_ms as u64;
-            }
-            if let Some(grace_period_ms) = healthcheck_grace_period_ms {
-                config.grace_period_ms = grace_period_ms as u64;
-            }
-            if let Some(success_threshold) = healthcheck_success_threshold {
-                config.success_threshold = success_threshold as u32;
-            }
-            if let Some(failure_threshold) = healthcheck_failure_threshold {
-                config.failure_threshold = failure_threshold as u32;
-            }
-
-            Ok(Some(HealthCheckConfig::Tcp(config).normalized()))
-        }
-    }
-}
-
-fn healthcheck_enabled(value: &Option<HealthCheckConfig>) -> Option<i64> {
-    value.as_ref().map(|config| i64::from(config.enabled()))
-}
-
-fn healthcheck_interval_ms(value: &Option<HealthCheckConfig>) -> Option<i64> {
-    value.as_ref().map(|config| config.interval_ms() as i64)
-}
-
-fn healthcheck_timeout_ms(value: &Option<HealthCheckConfig>) -> Option<i64> {
-    value.as_ref().map(|config| config.timeout_ms() as i64)
-}
-
-fn healthcheck_grace_period_ms(value: &Option<HealthCheckConfig>) -> Option<i64> {
-    value.as_ref().map(|config| config.grace_period_ms() as i64)
-}
-
-fn healthcheck_success_threshold(value: &Option<HealthCheckConfig>) -> Option<i64> {
-    value
-        .as_ref()
-        .map(|config| config.success_threshold() as i64)
-}
-
-fn healthcheck_failure_threshold(value: &Option<HealthCheckConfig>) -> Option<i64> {
-    value
-        .as_ref()
-        .map(|config| config.failure_threshold() as i64)
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
@@ -602,8 +369,7 @@ mod tests {
     use crate::{
         models::{
             DetectedProjectType, DetectionEvidence, DetectionEvidenceKind, DetectionWarning,
-            GroupNode, HealthCheckConfig, HttpHealthCheckConfig, ProjectNode,
-            ProjectPackageManager, Workspace,
+            GroupNode, ProjectNode, ProjectPackageManager, Workspace,
         },
         persistence::{test_utils::TestDatabase, GroupRepository, WorkspaceRepository},
     };
@@ -659,19 +425,6 @@ mod tests {
                 message: "Command inferred from project scripts".into(),
                 source: Some("package.json".into()),
             }]),
-            health_check: Some(HealthCheckConfig::Http(HttpHealthCheckConfig {
-                enabled: true,
-                interval_ms: 5_000,
-                timeout_ms: 2_000,
-                grace_period_ms: 3_000,
-                success_threshold: 1,
-                failure_threshold: 2,
-                url: "http://127.0.0.1:3000/health".into(),
-                method: "GET".into(),
-                expected_status_codes: vec![200],
-                headers: None,
-                contains_text: None,
-            })),
             created_at: "2026-04-14T09:00:00Z".into(),
             updated_at: "2026-04-14T09:00:00Z".into(),
         };
@@ -713,7 +466,6 @@ mod tests {
                 weight: 0.25,
             }]),
             warnings: None,
-            health_check: None,
             updated_at: "2026-04-14T10:00:00Z".into(),
             ..original_project.clone()
         };

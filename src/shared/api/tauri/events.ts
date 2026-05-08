@@ -1,6 +1,5 @@
 import { listen as tauriListen, type UnlistenFn } from '@tauri-apps/api/event'
 import type {
-  ProjectHealthState,
   RunHistoryEntry,
   RuntimeLogLine,
   RuntimeProcessErrorEvent,
@@ -9,7 +8,6 @@ import type {
 } from '../../types'
 
 export const RUNTIME_EVENTS = {
-  healthChanged: 'runtime://health-changed',
   historyAppended: 'runtime://history-appended',
   logLine: 'runtime://log-line',
   processError: 'runtime://process-error',
@@ -18,7 +16,6 @@ export const RUNTIME_EVENTS = {
 } as const
 
 type RuntimeEventMap = {
-  [RUNTIME_EVENTS.healthChanged]: ProjectHealthState
   [RUNTIME_EVENTS.historyAppended]: RunHistoryEntry
   [RUNTIME_EVENTS.logLine]: RuntimeLogLine
   [RUNTIME_EVENTS.processError]: RuntimeProcessErrorEvent

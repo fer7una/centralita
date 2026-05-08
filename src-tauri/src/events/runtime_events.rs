@@ -4,15 +4,14 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Runtime};
 
 use crate::models::{
-    ProjectHealthState, RunHistoryEntry, RuntimeLogLine, RuntimeProcessErrorEvent,
-    RuntimeProcessExitedEvent, RuntimeStatusEvent,
+    RunHistoryEntry, RuntimeLogLine, RuntimeProcessErrorEvent, RuntimeProcessExitedEvent,
+    RuntimeStatusEvent,
 };
 
 pub const STATUS_CHANGED_EVENT: &str = "runtime://status-changed";
 pub const LOG_LINE_EVENT: &str = "runtime://log-line";
 pub const PROCESS_EXITED_EVENT: &str = "runtime://process-exited";
 pub const PROCESS_ERROR_EVENT: &str = "runtime://process-error";
-pub const HEALTH_CHANGED_EVENT: &str = "runtime://health-changed";
 pub const HISTORY_APPENDED_EVENT: &str = "runtime://history-appended";
 
 pub type RuntimeEventEmitter = Arc<dyn Fn(&'static str, serde_json::Value) + Send + Sync>;
@@ -43,10 +42,6 @@ pub fn emit_process_exited(emitter: &RuntimeEventEmitter, payload: &RuntimeProce
 
 pub fn emit_process_error(emitter: &RuntimeEventEmitter, payload: &RuntimeProcessErrorEvent) {
     emit(emitter, PROCESS_ERROR_EVENT, payload);
-}
-
-pub fn emit_health_changed(emitter: &RuntimeEventEmitter, payload: &ProjectHealthState) {
-    emit(emitter, HEALTH_CHANGED_EVENT, payload);
 }
 
 pub fn emit_history_appended(emitter: &RuntimeEventEmitter, payload: &RunHistoryEntry) {

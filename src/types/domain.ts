@@ -25,13 +25,6 @@ export type RuntimeStatus =
   | 'STOPPING'
   | 'FAILED'
 export type RuntimeLogStream = 'stdout' | 'stderr'
-export type HealthStatus =
-  | 'UNKNOWN'
-  | 'CHECKING'
-  | 'HEALTHY'
-  | 'UNHEALTHY'
-  | 'UNSUPPORTED'
-export type HealthCheckKind = 'http' | 'tcp'
 
 export type DetectionEvidenceKind =
   | 'structuralFile'
@@ -86,45 +79,6 @@ export interface ProcessRuntimeState {
   commandPreview: string
 }
 
-export interface HttpHealthCheckConfig {
-  type: 'http'
-  enabled: boolean
-  intervalMs: number
-  timeoutMs: number
-  gracePeriodMs: number
-  successThreshold: number
-  failureThreshold: number
-  url: string
-  method: string
-  expectedStatusCodes: number[]
-  headers?: Record<string, string> | null
-  containsText?: string | null
-}
-
-export interface TcpHealthCheckConfig {
-  type: 'tcp'
-  enabled: boolean
-  intervalMs: number
-  timeoutMs: number
-  gracePeriodMs: number
-  successThreshold: number
-  failureThreshold: number
-  host: string
-  port: number
-}
-
-export type HealthCheckConfig = HttpHealthCheckConfig | TcpHealthCheckConfig
-
-export interface ProjectHealthState {
-  projectId: EntityId
-  status: HealthStatus
-  lastCheckedAt?: IsoDateTime | null
-  lastHealthyAt?: IsoDateTime | null
-  lastError?: string | null
-  consecutiveSuccesses: number
-  consecutiveFailures: number
-}
-
 export interface RunHistoryEntry {
   id: EntityId
   projectId: EntityId
@@ -132,7 +86,6 @@ export interface RunHistoryEntry {
   endedAt?: IsoDateTime | null
   exitCode?: number | null
   finalRuntimeStatus: RuntimeStatus
-  finalHealthStatus?: HealthStatus | null
   stopReason?: string | null
   errorMessage?: string | null
   commandPreview: string
@@ -146,21 +99,11 @@ export interface WorkspaceRuntimeStatusCounts {
   failed: number
 }
 
-export interface WorkspaceHealthStatusCounts {
-  unknown: number
-  checking: number
-  healthy: number
-  unhealthy: number
-  unsupported: number
-}
-
 export interface WorkspaceObservabilitySummary {
   workspaceId: EntityId
   totalProjects: number
   runtimeStatus: RuntimeStatus
-  healthStatus: HealthStatus
   runtimeCounts: WorkspaceRuntimeStatusCounts
-  healthCounts: WorkspaceHealthStatusCounts
 }
 
 export interface WorkspaceRuntimeStatus {
@@ -265,7 +208,6 @@ export interface ProjectNode {
   detectionConfidence?: number | null
   detectionEvidence?: DetectionEvidence[] | null
   warnings?: DetectionWarning[] | null
-  healthCheck?: HealthCheckConfig | null
   createdAt: IsoDateTime
   updatedAt: IsoDateTime
 }
@@ -335,7 +277,6 @@ export interface CreateProjectInput {
   detectionConfidence?: number | null
   detectionEvidence?: DetectionEvidence[] | null
   warnings?: DetectionWarning[] | null
-  healthCheck?: HealthCheckConfig | null
 }
 
 export interface UpdateProjectInput {
@@ -355,7 +296,6 @@ export interface UpdateProjectInput {
   detectionConfidence?: number | null
   detectionEvidence?: DetectionEvidence[] | null
   warnings?: DetectionWarning[] | null
-  healthCheck?: HealthCheckConfig | null
 }
 
 export interface DetectionResult {
@@ -421,16 +361,6 @@ export interface CreateProjectFromDetectionInput {
   detectionConfidence: number
   detectionEvidence: DetectionEvidence[]
   warnings?: DetectionWarning[]
-  healthCheck?: HealthCheckConfig | null
-}
-
-export interface UpdateProjectHealthCheckInput {
-  projectId: EntityId
-  healthCheck?: HealthCheckConfig | null
-}
-
-export interface GetProjectHealthStatusInput {
-  projectId: EntityId
 }
 
 export interface ListProjectRunHistoryInput {

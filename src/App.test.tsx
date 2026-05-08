@@ -32,7 +32,6 @@ vi.mock('./features/workspace/api', () => ({
 }))
 
 vi.mock('./features/runtime/api', () => ({
-  getProjectHealthStatus: vi.fn(),
   getProjectLogs: vi.fn(),
   getProjectRuntimeStatus: vi.fn(),
   getWorkspaceObservabilitySummary: vi.fn(),
@@ -40,14 +39,12 @@ vi.mock('./features/runtime/api', () => ({
   listProjectRunHistory: vi.fn(),
   listWorkspaceRunHistory: vi.fn(),
   restartProject: vi.fn(),
-  refreshProjectHealth: vi.fn(),
   startGroup: vi.fn(),
   startProject: vi.fn(),
   startWorkspace: vi.fn(),
   stopGroup: vi.fn(),
   stopProject: vi.fn(),
   stopWorkspace: vi.fn(),
-  updateProjectHealthCheck: vi.fn(),
 }))
 
 vi.mock('@tauri-apps/plugin-dialog', () => ({
@@ -56,7 +53,6 @@ vi.mock('@tauri-apps/plugin-dialog', () => ({
 
 vi.mock('./shared/api/tauri', () => ({
   RUNTIME_EVENTS: {
-    healthChanged: 'runtime://health-changed',
     historyAppended: 'runtime://history-appended',
     logLine: 'runtime://log-line',
     processError: 'runtime://process-error',
@@ -111,7 +107,6 @@ describe('CentralitaApp', () => {
     detectionConfidence: 0.9,
     detectionEvidence: [],
     warnings: [],
-    healthCheck: null,
     createdAt: '2026-04-16T07:00:00Z',
     updatedAt: '2026-04-16T07:00:00Z',
   }
@@ -191,15 +186,6 @@ describe('CentralitaApp', () => {
       workspaceRuntime,
     )
     vi.mocked(runtimeApi.getProjectLogs).mockResolvedValue([])
-    vi.mocked(runtimeApi.getProjectHealthStatus).mockResolvedValue({
-      projectId: 'project-ui',
-      status: 'UNSUPPORTED',
-      lastCheckedAt: null,
-      lastHealthyAt: null,
-      lastError: null,
-      consecutiveSuccesses: 0,
-      consecutiveFailures: 0,
-    })
     vi.mocked(runtimeApi.listProjectRunHistory).mockResolvedValue([])
     vi.mocked(runtimeApi.startProject).mockResolvedValue(
       workspaceRuntime.projects[0],
@@ -245,24 +231,6 @@ describe('CentralitaApp', () => {
       affectedProjectIds: [],
       skippedProjectIds: [],
       failures: [],
-    })
-    vi.mocked(runtimeApi.refreshProjectHealth).mockResolvedValue({
-      projectId: 'project-ui',
-      status: 'UNSUPPORTED',
-      lastCheckedAt: null,
-      lastHealthyAt: null,
-      lastError: null,
-      consecutiveSuccesses: 0,
-      consecutiveFailures: 0,
-    })
-    vi.mocked(runtimeApi.updateProjectHealthCheck).mockResolvedValue({
-      projectId: 'project-ui',
-      status: 'UNKNOWN',
-      lastCheckedAt: null,
-      lastHealthyAt: null,
-      lastError: null,
-      consecutiveSuccesses: 0,
-      consecutiveFailures: 0,
     })
     vi.mocked(workspaceApi.deleteProject).mockResolvedValue(true)
     vi.mocked(workspaceApi.updateGroup).mockResolvedValue(
@@ -340,11 +308,6 @@ describe('CentralitaApp', () => {
         screen.getByRole('button', { name: 'Abrir workspace Centralita' }),
       ).getByTitle('STOPPED'),
     ).toBeInTheDocument()
-    expect(
-      within(
-        screen.getByRole('button', { name: 'Abrir workspace Centralita' }),
-      ).queryByTitle('UNSUPPORTED'),
-    ).not.toBeInTheDocument()
   })
 
   it('shows workspace project status cards filtered by the default running status plus errors', async () => {
@@ -608,80 +571,6 @@ describe('CentralitaApp', () => {
     })
   })
 
-  it('shows health indicators when at least one project supports health checks', async () => {
-    const projectWithHealth: ProjectNode = {
-      ...project,
-      healthCheck: {
-        type: 'http',
-        enabled: true,
-        intervalMs: 1000,
-        timeoutMs: 1000,
-        gracePeriodMs: 0,
-        successThreshold: 1,
-        failureThreshold: 1,
-        url: 'http://127.0.0.1:1420/health',
-        method: 'GET',
-        expectedStatusCodes: [200],
-        headers: null,
-        containsText: null,
-      },
-    }
-    const currentTree: WorkspaceTree = {
-      ...workspaceTree,
-      groups: [
-        {
-          ...workspaceTree.groups[0],
-          projects: [projectWithHealth],
-        },
-      ],
-    }
-
-    vi.mocked(workspaceApi.getWorkspaceTree).mockImplementation(
-      async (workspaceId: string) =>
-        workspaceId === 'workspace-ops' ? workspaceOpsTree : currentTree,
-    )
-    vi.mocked(runtimeApi.getProjectHealthStatus).mockResolvedValue({
-      projectId: project.id,
-      status: 'HEALTHY',
-      lastCheckedAt: '2026-04-16T07:15:00Z',
-      lastHealthyAt: '2026-04-16T07:15:00Z',
-      lastError: null,
-      consecutiveSuccesses: 1,
-      consecutiveFailures: 0,
-    })
-
-    render(<CentralitaApp />)
-
-    const workspaceButton = await screen.findByRole('button', {
-      name: 'Abrir workspace Centralita',
-    })
-    expect(
-      await within(workspaceButton).findByTitle('HEALTHY'),
-    ).toBeInTheDocument()
-    expect(screen.getByLabelText('Health')).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: 'Expandir Frontend' }))
-    expect(
-      await within(
-        screen.getByRole('button', { name: 'Abrir proyecto centralita-ui' }),
-      ).findByTitle('HEALTHY'),
-    ).toBeInTheDocument()
-
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Abrir proyecto centralita-ui' }),
-    )
-
-    expect(
-      await screen.findByRole('heading', { name: 'Runtime y health' }),
-    ).toBeInTheDocument()
-    expect(
-      screen.getByRole('button', { name: 'Refrescar health' }),
-    ).toBeInTheDocument()
-    expect(
-      screen.getByRole('heading', { name: 'Configuración activa' }),
-    ).toBeInTheDocument()
-  })
-
   it('shows the empty workspace message without a collapse toggle or workspace label', async () => {
     const emptyMainTree: WorkspaceTree = {
       workspace,
@@ -730,8 +619,6 @@ describe('CentralitaApp', () => {
     render(
       <WorkspaceRuntimeTreeView
         activeWorkspaceId={workspace.id}
-        healthByProjectId={{}}
-        healthFilter="ALL"
         isLoadingPersistedState={false}
         onEnsureWorkspaceTree={vi.fn().mockResolvedValue(undefined)}
         onRequestMove={vi.fn()}
@@ -741,7 +628,6 @@ describe('CentralitaApp', () => {
         runtimeFilter="ALL"
         selectedItem={{ id: workspace.id, type: 'workspace' }}
         statusByProjectId={{}}
-        workspaceHealthStatus="UNSUPPORTED"
         workspaceStatus="STOPPED"
         workspaceTrees={{
           [workspace.id]: workspaceTree,
@@ -1263,9 +1149,6 @@ describe('CentralitaApp', () => {
     ).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Stop' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Restart' })).toBeDisabled()
-    expect(
-      screen.queryByRole('button', { name: 'Refrescar health' }),
-    ).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Limpiar vista' })).toBeDisabled()
 
     fireEvent.change(within(projectDialog).getByLabelText('Ruta'), {
@@ -1570,7 +1453,6 @@ describe('CentralitaApp', () => {
         endedAt: '2026-04-16T07:30:00Z',
         exitCode: 1,
         finalRuntimeStatus: 'FAILED' as const,
-        finalHealthStatus: null,
         stopReason: 'process exited',
         errorMessage: 'Vite failed during startup',
         commandPreview: 'pnpm dev',

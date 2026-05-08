@@ -12,11 +12,10 @@ use crate::{
     detection,
     models::{
         CommandArgs, CommandValidation, DetectedProjectType, DetectionEvidence, DetectionResult,
-        DetectionWarning, EntityId, EnvironmentVariables, GroupNode, HealthCheckConfig,
-        ProjectHealthState, ProjectNode, ProjectPackageManager, RunHistoryEntry,
-        RuntimeBulkFailure, RuntimeBulkOperationResult, RuntimeLogLine, RuntimeOperationScope,
-        RuntimeStatus, Workspace, WorkspaceObservabilitySummary, WorkspaceRuntimeStatus,
-        WorkspaceTree,
+        DetectionWarning, EntityId, EnvironmentVariables, GroupNode, ProjectNode,
+        ProjectPackageManager, RunHistoryEntry, RuntimeBulkFailure, RuntimeBulkOperationResult,
+        RuntimeLogLine, RuntimeOperationScope, RuntimeStatus, Workspace,
+        WorkspaceObservabilitySummary, WorkspaceRuntimeStatus, WorkspaceTree,
     },
     persistence::{
         AppDatabase, GroupRepository, ProjectRepository, RunHistoryRepository, WorkspaceRepository,
@@ -124,7 +123,6 @@ pub struct CreateProjectFromDetectionInput {
     pub detection_confidence: f64,
     pub detection_evidence: Vec<DetectionEvidence>,
     pub warnings: Option<Vec<DetectionWarning>>,
-    pub health_check: Option<HealthCheckConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -166,7 +164,6 @@ pub struct CreateProjectInput {
     pub detection_confidence: Option<f64>,
     pub detection_evidence: Option<Vec<DetectionEvidence>>,
     pub warnings: Option<Vec<DetectionWarning>>,
-    pub health_check: Option<HealthCheckConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -188,14 +185,6 @@ pub struct UpdateProjectInput {
     pub detection_confidence: Option<f64>,
     pub detection_evidence: Option<Vec<DetectionEvidence>>,
     pub warnings: Option<Vec<DetectionWarning>>,
-    pub health_check: Option<HealthCheckConfig>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdateProjectHealthCheckInput {
-    pub project_id: EntityId,
-    pub health_check: Option<HealthCheckConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -282,63 +271,6 @@ pub fn get_project_logs(
 }
 
 #[tauri::command]
-pub fn get_project_health_status(
-    input: ProjectRuntimeInput,
-    database: State<'_, AppDatabase>,
-    process_manager: State<'_, ProcessManager>,
-) -> CommandResult<ProjectHealthState> {
-    let repository = ProjectRepository::new(database.inner().clone());
-    let project = repository
-        .find_by_id(&input.project_id)
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| format!("Project '{}' not found", input.project_id))?;
-
-    Ok(process_manager.project_health_state(&project))
-}
-
-#[tauri::command]
-pub fn refresh_project_health(
-    input: ProjectRuntimeInput,
-    database: State<'_, AppDatabase>,
-    process_manager: State<'_, ProcessManager>,
-) -> CommandResult<ProjectHealthState> {
-    let repository = ProjectRepository::new(database.inner().clone());
-    let project = repository
-        .find_by_id(&input.project_id)
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| format!("Project '{}' not found", input.project_id))?;
-
-    process_manager
-        .refresh_project_health(&project)
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-pub fn update_project_health_check(
-    input: UpdateProjectHealthCheckInput,
-    database: State<'_, AppDatabase>,
-    process_manager: State<'_, ProcessManager>,
-) -> CommandResult<ProjectHealthState> {
-    let repository = ProjectRepository::new(database.inner().clone());
-    let timestamp = timestamps::now_iso().map_err(|error| error.to_string())?;
-    let health_check = input.health_check.map(|config| config.normalized());
-
-    let was_updated = repository
-        .update_health_check(&input.project_id, &health_check, &timestamp)
-        .map_err(|error| error.to_string())?;
-    if !was_updated {
-        return Err(format!("Project '{}' not found", input.project_id));
-    }
-
-    let updated_project = repository
-        .find_by_id(&input.project_id)
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| format!("Project '{}' not found", input.project_id))?;
-
-    Ok(process_manager.update_project_health_check(&updated_project))
-}
-
-#[tauri::command]
 pub fn list_project_run_history(
     input: ListProjectRunHistoryInput,
     database: State<'_, AppDatabase>,
@@ -371,17 +303,13 @@ pub fn get_workspace_observability_summary(
         .iter()
         .map(|project| process_manager.project_state(project))
         .collect::<Vec<_>>();
-    let health_states = process_manager.project_health_states(&projects);
     let workspace_runtime = WorkspaceRuntimeStatus {
         workspace_id: input.workspace_id,
         status: aggregate_runtime_status(runtime_projects.iter().map(|project| project.status)),
         projects: runtime_projects,
     };
 
-    Ok(build_workspace_observability_summary(
-        &workspace_runtime,
-        &health_states,
-    ))
+    Ok(build_workspace_observability_summary(&workspace_runtime))
 }
 
 #[tauri::command]
@@ -602,7 +530,6 @@ pub fn create_project_from_detection(
         detection_confidence: Some(input.detection_confidence),
         detection_evidence: Some(input.detection_evidence),
         warnings: input.warnings,
-        health_check: input.health_check.map(|config| config.normalized()),
         created_at: timestamp.clone(),
         updated_at: timestamp,
     };
@@ -772,7 +699,6 @@ pub fn create_project(
         detection_confidence: input.detection_confidence,
         detection_evidence: input.detection_evidence,
         warnings: input.warnings,
-        health_check: input.health_check.map(|config| config.normalized()),
         created_at: timestamp.clone(),
         updated_at: timestamp,
     };
@@ -813,7 +739,6 @@ pub fn update_project(
         detection_confidence: input.detection_confidence,
         detection_evidence: input.detection_evidence,
         warnings: input.warnings,
-        health_check: input.health_check.map(|config| config.normalized()),
         created_at: existing_project.created_at,
         updated_at: timestamps::now_iso().map_err(|error| error.to_string())?,
     };
