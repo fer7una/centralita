@@ -171,6 +171,11 @@ describe('CentralitaApp', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    window.localStorage.clear()
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      value: 1024,
+    })
     scrollIntoViewMock.mockClear()
     scrollToMock.mockClear()
     vi.mocked(listenRuntimeEvent).mockResolvedValue(() => {})
@@ -308,6 +313,74 @@ describe('CentralitaApp', () => {
         screen.getByRole('button', { name: 'Abrir workspace Centralita' }),
       ).getByTitle('STOPPED'),
     ).toBeInTheDocument()
+  })
+
+  it('enables back and forward navigation only when history is available', async () => {
+    render(<CentralitaApp />)
+
+    const backButton = await screen.findByRole('button', {
+      name: 'Navegar atras',
+    })
+    const forwardButton = screen.getByRole('button', {
+      name: 'Navegar adelante',
+    })
+
+    expect(backButton).toBeDisabled()
+    expect(forwardButton).toBeDisabled()
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Abrir grupo Frontend' }),
+    )
+
+    await waitFor(() => {
+      expect(requireTreeRow('Abrir grupo Frontend')).toHaveClass('selected')
+    })
+    expect(backButton).toBeEnabled()
+    expect(forwardButton).toBeDisabled()
+
+    fireEvent.click(backButton)
+
+    await waitFor(() => {
+      expect(requireTreeRow('Abrir workspace Centralita')).toHaveClass(
+        'selected',
+      )
+    })
+    expect(backButton).toBeDisabled()
+    expect(forwardButton).toBeEnabled()
+
+    fireEvent.click(forwardButton)
+
+    await waitFor(() => {
+      expect(requireTreeRow('Abrir grupo Frontend')).toHaveClass('selected')
+    })
+    expect(backButton).toBeEnabled()
+    expect(forwardButton).toBeDisabled()
+  })
+
+  it('persists navigator width changes from the accessible resize separator', async () => {
+    render(<CentralitaApp />)
+
+    const resizeHandle = await screen.findByRole('separator', {
+      name: 'Redimensionar navegador',
+    })
+    const shell = resizeHandle.closest('.workspace-shell') as HTMLElement
+
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      value: 1200,
+    })
+    Object.defineProperty(shell, 'clientWidth', {
+      configurable: true,
+      value: 1200,
+    })
+
+    await act(async () => {
+      fireEvent.keyDown(resizeHandle, { key: 'ArrowRight' })
+    })
+
+    expect(window.localStorage.getItem('centralita:navigator-width')).toBe(
+      '256',
+    )
   })
 
   it('shows workspace project status cards filtered by the default running status plus errors', async () => {
@@ -1480,7 +1553,9 @@ describe('CentralitaApp', () => {
       name: 'Historial de errores',
     })
 
-    expect(within(dialog).getByText('Failed to start project')).toBeInTheDocument()
+    expect(
+      within(dialog).getByText('Failed to start project'),
+    ).toBeInTheDocument()
     expect(
       within(dialog).getByText('Vite failed during startup'),
     ).toBeInTheDocument()
@@ -1559,9 +1634,7 @@ describe('CentralitaApp', () => {
       expect(
         within(runtimeErrorRow!).getByText('Sin errores registrados'),
       ).toBeInTheDocument()
-      expect(
-        screen.getByText('Todavía no hay logs.'),
-      ).toBeInTheDocument()
+      expect(screen.getByText('Todavía no hay logs.')).toBeInTheDocument()
     })
   })
 
@@ -1617,7 +1690,9 @@ describe('CentralitaApp', () => {
       }),
     )
 
-    expect(await screen.findByText('Failed to start project')).toBeInTheDocument()
+    expect(
+      await screen.findByText('Failed to start project'),
+    ).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Start' }))
 
@@ -1644,7 +1719,9 @@ describe('CentralitaApp', () => {
         .closest('article')
       expect(runtimePanel).not.toBeNull()
 
-      const commandRow = within(runtimePanel!).getByText('Comando').closest('li')
+      const commandRow = within(runtimePanel!)
+        .getByText('Comando')
+        .closest('li')
       expect(commandRow).not.toBeNull()
       expect(within(commandRow!).getByText('pnpm dev')).toBeInTheDocument()
       expect(

@@ -439,12 +439,16 @@ textarea {
 }
 
 .workspace-shell {
+  --navigator-resize-handle-width: 8px;
   height: 100vh;
   min-height: 100vh;
   padding: 20px;
   display: grid;
-  grid-template-columns: minmax(320px, 33fr) minmax(0, 67fr);
-  gap: 20px;
+  grid-template-columns:
+    var(--navigator-width, minmax(20vw, 33fr))
+    var(--navigator-resize-handle-width)
+    minmax(0, 67fr);
+  gap: 6px;
   overflow: hidden;
 }
 
@@ -478,6 +482,34 @@ textarea {
   min-width: 0;
 }
 
+.app-navigation-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.app-title-block {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.app-navigation-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.app-navigation-button {
+  width: 34px;
+  height: 34px;
+  background: var(--bg-surface-muted);
+  border-color: var(--border-subtle);
+}
+
 .card,
 .hero {
   width: 100%;
@@ -495,6 +527,53 @@ textarea {
   align-content: start;
   max-height: calc(100vh - 40px);
   overflow: auto;
+}
+
+.navigator-resize-handle {
+  align-self: stretch;
+  width: var(--navigator-resize-handle-width);
+  height: calc(100vh - 40px);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  cursor: col-resize;
+  outline: none;
+  position: relative;
+  touch-action: none;
+}
+
+.navigator-resize-handle::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  transform: translateX(-50%);
+  transition:
+    background 140ms ease,
+    width 140ms ease;
+}
+
+.navigator-resize-handle:hover::before,
+.navigator-resize-handle:focus-visible::before,
+.workspace-shell.is-resizing-navigator .navigator-resize-handle::before {
+  width: 3px;
+  background: var(--border-strong);
+}
+
+.navigator-resize-handle,
+.navigator-resize-handle * {
+  cursor: col-resize;
+}
+
+.workspace-shell.is-resizing-navigator,
+.workspace-shell.is-resizing-navigator * {
+  cursor: col-resize;
+  user-select: none;
 }
 
 .app-shell {
@@ -786,15 +865,17 @@ textarea {
 }
 
 .workspace-create-button:hover,
-.workspace-create-button:focus-visible {
-  width: 174px;
+.workspace-create-button:focus-visible,
+.workspace-create-button.is-expanded {
+  width: 180px;
   aspect-ratio: auto;
   padding-inline: 16px;
   gap: 6px;
 }
 
 .workspace-create-button:hover .workspace-create-label,
-.workspace-create-button:focus-visible .workspace-create-label {
+.workspace-create-button:focus-visible .workspace-create-label,
+.workspace-create-button.is-expanded .workspace-create-label {
   max-width: 128px;
   opacity: 1;
 }
@@ -2214,7 +2295,12 @@ textarea {
   .workspace-shell {
     height: auto;
     grid-template-columns: 1fr;
+    gap: 20px;
     overflow: visible;
+  }
+
+  .navigator-resize-handle {
+    display: none;
   }
 
   .main-panel {
@@ -2249,7 +2335,6 @@ textarea {
   .detail-columns-wide {
     grid-template-columns: 1fr;
   }
-
 }
 
 @media (max-width: 720px) {

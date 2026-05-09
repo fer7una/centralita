@@ -2,6 +2,8 @@ import { open } from '@tauri-apps/plugin-dialog'
 import {
   Activity,
   AlertTriangle,
+  ArrowLeft,
+  ArrowRight,
   CheckCircle2,
   CircleDashed,
   Clock,
@@ -20,8 +22,22 @@ import {
   Trash2,
   XCircle,
 } from 'lucide-react'
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { ComponentType, ReactNode, SVGProps } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
+import type {
+  ComponentType,
+  CSSProperties,
+  KeyboardEvent as ReactKeyboardEvent,
+  PointerEvent as ReactPointerEvent,
+  ReactNode,
+  SVGProps,
+} from 'react'
 import { BlockedActionButton } from './components/BlockedActionButton'
 import { ModalFrame } from './components/ModalFrame'
 import { ProjectLogsPanel } from './components/logs/ProjectLogsPanel'
@@ -91,6 +107,14 @@ const packageManagerOptions: Array<{
 ]
 
 const DEFAULT_GROUP_COLOR = '#2f855a'
+const NAVIGATOR_WIDTH_STORAGE_KEY = 'centralita:navigator-width'
+const NAVIGATOR_DETAIL_MIN_WIDTH_PX = 360
+const NAVIGATOR_MIN_WIDTH_RATIO = 0.2
+const NAVIGATOR_MAX_WIDTH_RATIO = 0.6
+const NAVIGATOR_RESIZE_RESERVED_WIDTH_PX = 20
+const NAVIGATOR_RESIZE_STEP_PX = 16
+const NAVIGATOR_RESIZE_LARGE_STEP_PX = 40
+const MAX_NAVIGATION_HISTORY_ENTRIES = 100
 
 type DetectionReviewDraft = {
   argsText: string
@@ -112,6 +136,13 @@ type TreeSelection =
   | { id: string; type: 'project' }
   | { id: string; type: 'workspace' }
   | null
+
+type NavigationItem = Exclude<TreeSelection, null>
+
+type NavigationEntry = {
+  item: NavigationItem
+  workspaceId: string
+}
 
 type GroupDetailDraft = {
   name: string
@@ -261,6 +292,38 @@ function areStringArraysEqual(left: string[], right: string[]) {
     left.length === right.length &&
     left.every((value, index) => value === right[index])
   )
+}
+
+function clampNumber(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max)
+}
+
+function readStoredNavigatorWidth() {
+  try {
+    const storedValue = window.localStorage.getItem(NAVIGATOR_WIDTH_STORAGE_KEY)
+    const parsedValue = storedValue ? Number(storedValue) : Number.NaN
+
+    return Number.isFinite(parsedValue) && parsedValue > 0
+      ? Math.round(parsedValue)
+      : null
+  } catch {
+    return null
+  }
+}
+
+function writeStoredNavigatorWidth(width: number) {
+  try {
+    window.localStorage.setItem(
+      NAVIGATOR_WIDTH_STORAGE_KEY,
+      String(Math.round(width)),
+    )
+  } catch {
+    // localStorage may be unavailable in restricted environments.
+  }
+}
+
+function getNavigatorMinWidth() {
+  return Math.round(window.innerWidth * NAVIGATOR_MIN_WIDTH_RATIO)
 }
 
 function formatCommandPreview(executable: string, args: string[]) {
@@ -427,7 +490,8 @@ function getDefaultProjectStatusFilter(
   statusByProjectId: Record<string, ProcessRuntimeState>,
 ): RuntimeStatus {
   return projects.some(
-    (project) => getProjectRuntimeStatus(project, statusByProjectId) === 'RUNNING',
+    (project) =>
+      getProjectRuntimeStatus(project, statusByProjectId) === 'RUNNING',
   )
     ? 'RUNNING'
     : 'STOPPED'
@@ -518,8 +582,24 @@ function groupProjectStatusCards(
   )
 
   return orphanProjects.length > 0
-    ? [...sections, { group: null, label: 'Sin grupo', projects: orphanProjects }]
+    ? [
+        ...sections,
+        { group: null, label: 'Sin grupo', projects: orphanProjects },
+      ]
     : sections
+}
+
+function navigationEntryKey(entry: NavigationEntry) {
+  return `${entry.workspaceId}:${entry.item.type}:${entry.item.id}`
+}
+
+function navigationEntriesEqual(
+  left: NavigationEntry | null,
+  right: NavigationEntry | null,
+) {
+  return Boolean(
+    left && right && navigationEntryKey(left) === navigationEntryKey(right),
+  )
 }
 
 type MetricTileProps = {
@@ -562,6 +642,10 @@ function CentralitaApp() {
 
   const [isWorkspaceModalOpen, setIsWorkspaceModalOpen] = useState(false)
   const [selection, setSelection] = useState<TreeSelection>(null)
+  const [navigationHistory, setNavigationHistory] = useState<{
+    entries: NavigationEntry[]
+    index: number
+  }>({ entries: [], index: -1 })
   const [workspaceName, setWorkspaceName] = useState('')
   const [workspaceRenameDraft, setWorkspaceRenameDraft] = useState<{
     value: string
@@ -606,11 +690,27 @@ function CentralitaApp() {
     projectId: string
   } | null>(null)
   const projectGitInfoRequestIdRef = useRef(0)
+  const [navigatorWidth, setNavigatorWidth] = useState<number | null>(() =>
+    readStoredNavigatorWidth(),
+  )
+  const [isNavigatorResizing, setIsNavigatorResizing] = useState(false)
+  const navigatorWidthRef = useRef(navigatorWidth)
+  const navigatorDragRef = useRef<{
+    maxWidth: number
+    minWidth: number
+    pointerId: number
+    startWidth: number
+    startX: number
+  } | null>(null)
+  const workspaceShellRef = useRef<HTMLElement | null>(null)
+  const explorerSidebarRef = useRef<HTMLElement | null>(null)
   const detailColumnRef = useRef<HTMLElement | null>(null)
 
   const activeWorkspace = workspaceStore.selectedWorkspace
   const allGroups = flattenGroups(workspaceStore.groups)
   const allProjects = flattenProjects(workspaceStore.groups)
+  const hasNoConfiguredWorkspaces =
+    !workspaceStore.isLoading && workspaceStore.workspaces.length === 0
 
   const resolvedSelection = useMemo<TreeSelection>(() => {
     if (!activeWorkspace) {
@@ -689,11 +789,315 @@ function CentralitaApp() {
   const resolvedSelectionKey = resolvedSelection
     ? `${resolvedSelection.type}:${resolvedSelection.id}`
     : 'none'
+  const currentNavigationEntry = useMemo<NavigationEntry | null>(() => {
+    if (!activeWorkspace || !resolvedSelection) {
+      return null
+    }
+
+    return {
+      item: resolvedSelection,
+      workspaceId: activeWorkspace.id,
+    }
+  }, [activeWorkspace, resolvedSelection])
+  const previousNavigationIndex = findAvailableNavigationHistoryIndex(-1)
+  const nextNavigationIndex = findAvailableNavigationHistoryIndex(1)
   const hasReviewDraft = reviewDraft !== null
   const reviewDraftExecutable = reviewDraft?.executable ?? ''
   const reviewDraftArgsText = reviewDraft?.argsText ?? ''
   const reviewDraftPath = reviewDraft?.path ?? ''
   const reviewDraftWorkingDir = reviewDraft?.workingDir ?? ''
+  const workspaceShellStyle =
+    navigatorWidth === null
+      ? undefined
+      : ({
+          '--navigator-width': `${navigatorWidth}px`,
+        } as CSSProperties)
+
+  function isNavigationEntryAvailable(entry: NavigationEntry) {
+    if (
+      !workspaceStore.workspaces.some(
+        (workspace) => workspace.id === entry.workspaceId,
+      )
+    ) {
+      return false
+    }
+
+    if (entry.item.type === 'workspace') {
+      return entry.item.id === entry.workspaceId
+    }
+
+    const workspaceTree = workspaceStore.treesByWorkspaceId[entry.workspaceId]
+    if (!workspaceTree) {
+      return true
+    }
+
+    return entry.item.type === 'group'
+      ? Boolean(findGroup(workspaceTree.groups, entry.item.id))
+      : Boolean(findProject(workspaceTree.groups, entry.item.id))
+  }
+
+  function findAvailableNavigationHistoryIndex(direction: -1 | 1) {
+    for (
+      let index = navigationHistory.index + direction;
+      index >= 0 && index < navigationHistory.entries.length;
+      index += direction
+    ) {
+      if (isNavigationEntryAvailable(navigationHistory.entries[index])) {
+        return index
+      }
+    }
+
+    return null
+  }
+
+  function pushNavigationEntry(entry: NavigationEntry) {
+    setNavigationHistory((current) => {
+      const currentEntry =
+        current.index >= 0 ? current.entries[current.index] : null
+
+      if (navigationEntriesEqual(currentEntry, entry)) {
+        return current
+      }
+
+      const retainedEntries =
+        current.index >= 0 ? current.entries.slice(0, current.index + 1) : []
+      const baseEntries =
+        retainedEntries.length === 0 &&
+        currentNavigationEntry &&
+        !navigationEntriesEqual(currentNavigationEntry, entry)
+          ? [currentNavigationEntry]
+          : retainedEntries
+      const lastBaseEntry = baseEntries[baseEntries.length - 1] ?? null
+      const nextEntries = navigationEntriesEqual(lastBaseEntry, entry)
+        ? baseEntries
+        : [...baseEntries, entry]
+      const overflowCount = Math.max(
+        0,
+        nextEntries.length - MAX_NAVIGATION_HISTORY_ENTRIES,
+      )
+      const trimmedEntries =
+        overflowCount > 0 ? nextEntries.slice(overflowCount) : nextEntries
+
+      return {
+        entries: trimmedEntries,
+        index: trimmedEntries.length - 1,
+      }
+    })
+  }
+
+  async function applyNavigationEntry(
+    entry: NavigationEntry,
+    options: { recordHistory: boolean },
+  ) {
+    setErrorHistoryProjectId(null)
+
+    if (entry.item.type === 'workspace') {
+      resetImportFlow()
+    }
+
+    if (entry.workspaceId !== workspaceStore.activeWorkspaceId) {
+      await workspaceStore.actions.selectWorkspace(entry.workspaceId)
+    }
+
+    if (entry.item.type === 'project') {
+      runtimeStore.actions.selectProject(entry.item.id)
+    }
+
+    setSelection(entry.item)
+
+    if (options.recordHistory) {
+      pushNavigationEntry(entry)
+    }
+  }
+
+  async function handleNavigateHistory(targetIndex: number | null) {
+    if (targetIndex === null) {
+      return
+    }
+
+    const targetEntry = navigationHistory.entries[targetIndex]
+    if (!targetEntry || !isNavigationEntryAvailable(targetEntry)) {
+      return
+    }
+
+    await applyNavigationEntry(targetEntry, { recordHistory: false })
+    setNavigationHistory((current) =>
+      targetIndex >= 0 && targetIndex < current.entries.length
+        ? { ...current, index: targetIndex }
+        : current,
+    )
+  }
+
+  const getNavigatorResizeBounds = useCallback(() => {
+    const shellWidth = workspaceShellRef.current?.clientWidth ?? 0
+    const minWidth = getNavigatorMinWidth()
+
+    if (shellWidth <= 0) {
+      return { maxWidth: minWidth, minWidth }
+    }
+
+    const maxWidth = Math.max(
+      minWidth,
+      Math.min(
+        Math.round(shellWidth * NAVIGATOR_MAX_WIDTH_RATIO),
+        shellWidth -
+          NAVIGATOR_RESIZE_RESERVED_WIDTH_PX -
+          NAVIGATOR_DETAIL_MIN_WIDTH_PX,
+      ),
+    )
+
+    return { maxWidth, minWidth }
+  }, [])
+
+  const getCurrentNavigatorWidth = useCallback(() => {
+    if (navigatorWidthRef.current !== null) {
+      return navigatorWidthRef.current
+    }
+
+    const renderedWidth =
+      explorerSidebarRef.current?.getBoundingClientRect().width ?? 0
+
+    return renderedWidth > 0
+      ? Math.round(renderedWidth)
+      : getNavigatorResizeBounds().minWidth
+  }, [getNavigatorResizeBounds])
+
+  const applyNavigatorWidth = useCallback(
+    (width: number, shouldPersist: boolean) => {
+      const nextWidth = Math.round(width)
+
+      navigatorWidthRef.current = nextWidth
+      setNavigatorWidth(nextWidth)
+
+      if (shouldPersist) {
+        writeStoredNavigatorWidth(nextWidth)
+      }
+    },
+    [],
+  )
+
+  function handleNavigatorResizePointerDown(
+    event: ReactPointerEvent<HTMLDivElement>,
+  ) {
+    if (event.button !== 0) {
+      return
+    }
+
+    const { maxWidth, minWidth } = getNavigatorResizeBounds()
+    const startWidth = clampNumber(
+      getCurrentNavigatorWidth(),
+      minWidth,
+      maxWidth,
+    )
+
+    navigatorDragRef.current = {
+      maxWidth,
+      minWidth,
+      pointerId: event.pointerId,
+      startWidth,
+      startX: event.clientX,
+    }
+    setIsNavigatorResizing(true)
+    event.currentTarget.setPointerCapture(event.pointerId)
+    event.preventDefault()
+  }
+
+  function handleNavigatorResizePointerMove(
+    event: ReactPointerEvent<HTMLDivElement>,
+  ) {
+    const currentDrag = navigatorDragRef.current
+
+    if (!currentDrag || currentDrag.pointerId !== event.pointerId) {
+      return
+    }
+
+    const nextWidth = clampNumber(
+      currentDrag.startWidth + event.clientX - currentDrag.startX,
+      currentDrag.minWidth,
+      currentDrag.maxWidth,
+    )
+
+    applyNavigatorWidth(nextWidth, false)
+  }
+
+  function finishNavigatorResize(event: ReactPointerEvent<HTMLDivElement>) {
+    const currentDrag = navigatorDragRef.current
+
+    if (!currentDrag || currentDrag.pointerId !== event.pointerId) {
+      return
+    }
+
+    navigatorDragRef.current = null
+    setIsNavigatorResizing(false)
+
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+
+    if (navigatorWidthRef.current !== null) {
+      writeStoredNavigatorWidth(navigatorWidthRef.current)
+    }
+  }
+
+  function handleNavigatorResizeKeyDown(
+    event: ReactKeyboardEvent<HTMLDivElement>,
+  ) {
+    const { maxWidth, minWidth } = getNavigatorResizeBounds()
+    const currentWidth = clampNumber(
+      getCurrentNavigatorWidth(),
+      minWidth,
+      maxWidth,
+    )
+    const step = event.shiftKey
+      ? NAVIGATOR_RESIZE_LARGE_STEP_PX
+      : NAVIGATOR_RESIZE_STEP_PX
+    let nextWidth: number | null = null
+
+    if (event.key === 'ArrowLeft') {
+      nextWidth = currentWidth - step
+    } else if (event.key === 'ArrowRight') {
+      nextWidth = currentWidth + step
+    } else if (event.key === 'Home') {
+      nextWidth = minWidth
+    } else if (event.key === 'End') {
+      nextWidth = maxWidth
+    }
+
+    if (nextWidth === null) {
+      return
+    }
+
+    event.preventDefault()
+    applyNavigatorWidth(clampNumber(nextWidth, minWidth, maxWidth), true)
+  }
+
+  useEffect(() => {
+    navigatorWidthRef.current = navigatorWidth
+  }, [navigatorWidth])
+
+  useLayoutEffect(() => {
+    function handleResize() {
+      const currentWidth = navigatorWidthRef.current
+
+      if (currentWidth === null) {
+        return
+      }
+
+      const { maxWidth, minWidth } = getNavigatorResizeBounds()
+      const nextWidth = clampNumber(currentWidth, minWidth, maxWidth)
+
+      if (nextWidth !== currentWidth) {
+        applyNavigatorWidth(nextWidth, true)
+      }
+    }
+
+    handleResize()
+    window.addEventListener('resize', handleResize)
+
+    return () => {
+      window.removeEventListener('resize', handleResize)
+    }
+  }, [applyNavigatorWidth, getNavigatorResizeBounds])
 
   useLayoutEffect(() => {
     const detailColumn = detailColumnRef.current
@@ -1111,10 +1515,13 @@ function CentralitaApp() {
   }
 
   async function handleSelectWorkspace(workspaceId: string) {
-    resetImportFlow()
-    setErrorHistoryProjectId(null)
-    setSelection({ id: workspaceId, type: 'workspace' })
-    await workspaceStore.actions.selectWorkspace(workspaceId)
+    await applyNavigationEntry(
+      {
+        item: { id: workspaceId, type: 'workspace' },
+        workspaceId,
+      },
+      { recordHistory: true },
+    )
   }
 
   async function handleCreateWorkspace() {
@@ -1215,24 +1622,23 @@ function CentralitaApp() {
   }
 
   async function handleSelectGroup(groupId: string, workspaceId: string) {
-    setErrorHistoryProjectId(null)
-
-    if (workspaceId !== workspaceStore.activeWorkspaceId) {
-      await workspaceStore.actions.selectWorkspace(workspaceId)
-    }
-
-    setSelection({ id: groupId, type: 'group' })
+    await applyNavigationEntry(
+      {
+        item: { id: groupId, type: 'group' },
+        workspaceId,
+      },
+      { recordHistory: true },
+    )
   }
 
   async function handleSelectProject(projectId: string, workspaceId: string) {
-    setErrorHistoryProjectId(null)
-
-    if (workspaceId !== workspaceStore.activeWorkspaceId) {
-      await workspaceStore.actions.selectWorkspace(workspaceId)
-    }
-
-    runtimeStore.actions.selectProject(projectId)
-    setSelection({ id: projectId, type: 'project' })
+    await applyNavigationEntry(
+      {
+        item: { id: projectId, type: 'project' },
+        workspaceId,
+      },
+      { recordHistory: true },
+    )
   }
 
   function renderDetectionReviewModal() {
@@ -1539,7 +1945,9 @@ function CentralitaApp() {
         aria-label={`Abrir detalle de proyecto ${project.name}`}
         className="workspace-project-status-card"
         key={project.id}
-        onClick={() => void handleSelectProject(project.id, project.workspaceId)}
+        onClick={() =>
+          void handleSelectProject(project.id, project.workspaceId)
+        }
         title={lastError ?? workingDir}
         type="button"
       >
@@ -1601,7 +2009,9 @@ function CentralitaApp() {
           <span>Agrupar por</span>
           <select
             onChange={(event) =>
-              setProjectListGroupMode(event.target.value as ProjectListGroupMode)
+              setProjectListGroupMode(
+                event.target.value as ProjectListGroupMode,
+              )
             }
             value={projectListGroupMode}
           >
@@ -1615,7 +2025,9 @@ function CentralitaApp() {
             <span>Ordenar por</span>
             <select
               onChange={(event) =>
-                setProjectListSortMode(event.target.value as ProjectListSortMode)
+                setProjectListSortMode(
+                  event.target.value as ProjectListSortMode,
+                )
               }
               value={projectListSortMode}
             >
@@ -1648,8 +2060,7 @@ function CentralitaApp() {
       projects,
       runtimeStore.statusByProjectId,
     )
-    const effectiveStatusFilter =
-      projectListStatusFilter ?? defaultStatusFilter
+    const effectiveStatusFilter = projectListStatusFilter ?? defaultStatusFilter
     const visibleProjects = projects.filter((project) =>
       shouldShowProjectStatusCard(
         project,
@@ -2271,7 +2682,6 @@ function CentralitaApp() {
               </p>
             )}
           </article>
-
         </section>
       </section>
     )
@@ -2837,11 +3247,50 @@ function CentralitaApp() {
 
   return (
     <>
-      <main className="workspace-shell app-shell">
-        <aside className="sidebar explorer-sidebar">
+      <main
+        className={`workspace-shell app-shell${
+          isNavigatorResizing ? ' is-resizing-navigator' : ''
+        }`}
+        ref={workspaceShellRef}
+        style={workspaceShellStyle}
+      >
+        <aside className="sidebar explorer-sidebar" ref={explorerSidebarRef}>
           <div className="sidebar-header">
-            <p className="eyebrow">Navegador</p>
-            <h1>La Centralita</h1>
+            <div className="app-navigation-header">
+              <div className="app-title-block">
+                <p className="eyebrow">Navegador</p>
+                <h1>La Centralita</h1>
+              </div>
+              <div
+                aria-label="Historial de navegacion"
+                className="app-navigation-controls"
+              >
+                <button
+                  aria-label="Navegar atras"
+                  className="icon-button app-navigation-button"
+                  disabled={previousNavigationIndex === null}
+                  onClick={() =>
+                    void handleNavigateHistory(previousNavigationIndex)
+                  }
+                  title="Navegar atras"
+                  type="button"
+                >
+                  <ArrowLeft aria-hidden="true" size={17} />
+                </button>
+                <button
+                  aria-label="Navegar adelante"
+                  className="icon-button app-navigation-button"
+                  disabled={nextNavigationIndex === null}
+                  onClick={() =>
+                    void handleNavigateHistory(nextNavigationIndex)
+                  }
+                  title="Navegar adelante"
+                  type="button"
+                >
+                  <ArrowRight aria-hidden="true" size={17} />
+                </button>
+              </div>
+            </div>
             <p className="lead"></p>
           </div>
 
@@ -2854,7 +3303,11 @@ function CentralitaApp() {
               <div className="navigator-header-actions">
                 <button
                   aria-label="+ Nuevo workspace"
-                  className="workspace-create-button"
+                  className={
+                    hasNoConfiguredWorkspaces
+                      ? 'workspace-create-button is-expanded'
+                      : 'workspace-create-button'
+                  }
                   onClick={() => setIsWorkspaceModalOpen(true)}
                   type="button"
                 >
@@ -2865,28 +3318,29 @@ function CentralitaApp() {
                     Nuevo workspace
                   </span>
                 </button>
-                <div className="navigator-filter-controls">
-                  <label className="field navigator-filter-field">
-                    <span>Filtrar por estado</span>
-                    <select
-                      onChange={(event) =>
-                        runtimeStore.actions.setRuntimeFilter(
-                          event.target
-                            .value as typeof runtimeStore.runtimeFilter,
-                        )
-                      }
-                      value={runtimeStore.runtimeFilter}
-                    >
-                      <option value="ALL">Todos</option>
-                      <option value="RUNNING">RUNNING</option>
-                      <option value="STARTING">STARTING</option>
-                      <option value="STOPPING">STOPPING</option>
-                      <option value="STOPPED">STOPPED</option>
-                      <option value="FAILED">FAILED</option>
-                    </select>
-                  </label>
-
-                </div>
+                {hasNoConfiguredWorkspaces ? null : (
+                  <div className="navigator-filter-controls">
+                    <label className="field navigator-filter-field">
+                      <span>Filtrar por estado</span>
+                      <select
+                        onChange={(event) =>
+                          runtimeStore.actions.setRuntimeFilter(
+                            event.target
+                              .value as typeof runtimeStore.runtimeFilter,
+                          )
+                        }
+                        value={runtimeStore.runtimeFilter}
+                      >
+                        <option value="ALL">Todos</option>
+                        <option value="RUNNING">RUNNING</option>
+                        <option value="STARTING">STARTING</option>
+                        <option value="STOPPING">STOPPING</option>
+                        <option value="STOPPED">STOPPED</option>
+                        <option value="FAILED">FAILED</option>
+                      </select>
+                    </label>
+                  </div>
+                )}
               </div>
             </div>
             <WorkspaceRuntimeTreeView
@@ -2916,6 +3370,20 @@ function CentralitaApp() {
             />
           </section>
         </aside>
+
+        <div
+          aria-label="Redimensionar navegador"
+          aria-orientation="vertical"
+          className="navigator-resize-handle"
+          onKeyDown={handleNavigatorResizeKeyDown}
+          onPointerCancel={finishNavigatorResize}
+          onPointerDown={handleNavigatorResizePointerDown}
+          onPointerMove={handleNavigatorResizePointerMove}
+          onPointerUp={finishNavigatorResize}
+          role="separator"
+          tabIndex={0}
+          title="Redimensionar navegador"
+        />
 
         <section className="main-panel detail-column" ref={detailColumnRef}>
           {workspaceStore.error ? (
