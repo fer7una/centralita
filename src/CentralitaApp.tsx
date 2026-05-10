@@ -115,6 +115,9 @@ const NAVIGATOR_RESIZE_RESERVED_WIDTH_PX = 20
 const NAVIGATOR_RESIZE_STEP_PX = 16
 const NAVIGATOR_RESIZE_LARGE_STEP_PX = 40
 const MAX_NAVIGATION_HISTORY_ENTRIES = 100
+const MOUSE_NAVIGATION_BACK_BUTTON = 3
+const MOUSE_NAVIGATION_FORWARD_BUTTON = 4
+const MOUSE_NAVIGATION_DEDUPE_WINDOW_MS = 250
 
 type DetectionReviewDraft = {
   argsText: string
@@ -705,6 +708,15 @@ function CentralitaApp() {
   const workspaceShellRef = useRef<HTMLElement | null>(null)
   const explorerSidebarRef = useRef<HTMLElement | null>(null)
   const detailColumnRef = useRef<HTMLElement | null>(null)
+  const previousNavigationIndexRef = useRef<number | null>(null)
+  const nextNavigationIndexRef = useRef<number | null>(null)
+  const navigateHistoryRef = useRef<
+    ((targetIndex: number | null) => Promise<void>) | null
+  >(null)
+  const lastMouseNavigationRef = useRef<{
+    button: number
+    timeStamp: number
+  } | null>(null)
 
   const activeWorkspace = workspaceStore.selectedWorkspace
   const allGroups = flattenGroups(workspaceStore.groups)
@@ -812,6 +824,14 @@ function CentralitaApp() {
       : ({
           '--navigator-width': `${navigatorWidth}px`,
         } as CSSProperties)
+
+  function resetImportFlow() {
+    reviewValidationRequestIdRef.current += 1
+    setImportPath('')
+    setIsReviewValidationPending(false)
+    setReviewDraft(null)
+    workspaceStore.actions.clearAnalysis()
+  }
 
   function isNavigationEntryAvailable(entry: NavigationEntry) {
     if (
@@ -1074,6 +1094,59 @@ function CentralitaApp() {
   useEffect(() => {
     navigatorWidthRef.current = navigatorWidth
   }, [navigatorWidth])
+
+  useEffect(() => {
+    previousNavigationIndexRef.current = previousNavigationIndex
+    nextNavigationIndexRef.current = nextNavigationIndex
+  }, [nextNavigationIndex, previousNavigationIndex])
+
+  useEffect(() => {
+    navigateHistoryRef.current = handleNavigateHistory
+  })
+
+  useEffect(() => {
+    function handleMouseNavigation(event: MouseEvent) {
+      if (
+        event.button !== MOUSE_NAVIGATION_BACK_BUTTON &&
+        event.button !== MOUSE_NAVIGATION_FORWARD_BUTTON
+      ) {
+        return
+      }
+
+      event.preventDefault()
+      event.stopPropagation()
+
+      const lastMouseNavigation = lastMouseNavigationRef.current
+      if (
+        lastMouseNavigation &&
+        lastMouseNavigation.button === event.button &&
+        event.timeStamp - lastMouseNavigation.timeStamp <
+          MOUSE_NAVIGATION_DEDUPE_WINDOW_MS
+      ) {
+        return
+      }
+
+      lastMouseNavigationRef.current = {
+        button: event.button,
+        timeStamp: event.timeStamp,
+      }
+
+      const targetIndex =
+        event.button === MOUSE_NAVIGATION_BACK_BUTTON
+          ? previousNavigationIndexRef.current
+          : nextNavigationIndexRef.current
+
+      void navigateHistoryRef.current?.(targetIndex)
+    }
+
+    window.addEventListener('mousedown', handleMouseNavigation, true)
+    window.addEventListener('auxclick', handleMouseNavigation, true)
+
+    return () => {
+      window.removeEventListener('mousedown', handleMouseNavigation, true)
+      window.removeEventListener('auxclick', handleMouseNavigation, true)
+    }
+  }, [])
 
   useLayoutEffect(() => {
     function handleResize() {
@@ -1503,14 +1576,6 @@ function CentralitaApp() {
     }
 
     setImportPath(normalizeWindowsPath(selectedPath))
-    workspaceStore.actions.clearAnalysis()
-  }
-
-  function resetImportFlow() {
-    reviewValidationRequestIdRef.current += 1
-    setImportPath('')
-    setIsReviewValidationPending(false)
-    setReviewDraft(null)
     workspaceStore.actions.clearAnalysis()
   }
 

@@ -338,6 +338,40 @@ describe('CentralitaApp', () => {
     expect(backButton).toBeEnabled()
     expect(forwardButton).toBeDisabled()
 
+    const mouseBackEvent = new MouseEvent('mousedown', {
+      bubbles: true,
+      button: 3,
+      cancelable: true,
+    })
+    await act(async () => {
+      window.dispatchEvent(mouseBackEvent)
+    })
+
+    await waitFor(() => {
+      expect(requireTreeRow('Abrir workspace Centralita')).toHaveClass(
+        'selected',
+      )
+    })
+    expect(mouseBackEvent.defaultPrevented).toBe(true)
+    expect(backButton).toBeDisabled()
+    expect(forwardButton).toBeEnabled()
+
+    const mouseForwardEvent = new MouseEvent('mousedown', {
+      bubbles: true,
+      button: 4,
+      cancelable: true,
+    })
+    await act(async () => {
+      window.dispatchEvent(mouseForwardEvent)
+    })
+
+    await waitFor(() => {
+      expect(requireTreeRow('Abrir grupo Frontend')).toHaveClass('selected')
+    })
+    expect(mouseForwardEvent.defaultPrevented).toBe(true)
+    expect(backButton).toBeEnabled()
+    expect(forwardButton).toBeDisabled()
+
     fireEvent.click(backButton)
 
     await waitFor(() => {
