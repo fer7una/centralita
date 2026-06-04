@@ -2110,13 +2110,106 @@ textarea {
    Logs / terminal — always dark for console legibility
    ========================================================================== */
 
+.log-terminal {
+  position: relative;
+}
+
+.log-search-control {
+  position: absolute;
+  top: 8px;
+  right: 24px;
+  z-index: 2;
+  display: flex;
+  max-width: calc(100% - 34px);
+}
+
+.log-search-box {
+  display: flex;
+  max-width: 100%;
+  min-height: 28px;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 5px 3px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.82);
+  color: var(--text-on-terminal);
+  box-shadow: var(--shadow-soft);
+}
+
+.log-search-box input {
+  width: clamp(72px, 22vw, 220px);
+  height: 22px;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: 1.2;
+  padding: 0;
+}
+
+.log-search-box input::placeholder {
+  color: rgba(245, 245, 245, 0.68);
+}
+
+.log-search-box button,
+.log-search-toggle {
+  display: inline-grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  flex: 0 0 auto;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-on-terminal);
+  cursor: pointer;
+  line-height: 1;
+  max-height: none;
+  padding: 0;
+}
+
+.log-search-box button svg,
+.log-search-toggle svg {
+  display: block;
+  margin: auto;
+}
+
+.log-search-box button:hover:not(:disabled),
+.log-search-toggle:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.log-search-box input:focus-visible,
+.log-search-box button:focus-visible,
+.log-search-toggle:focus-visible {
+  outline: 2px solid #fde047;
+  outline-offset: 2px;
+}
+
+.log-search-box button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.log-search-count {
+  min-width: 38px;
+  color: rgba(245, 245, 245, 0.78);
+  font-size: 0.72rem;
+  line-height: 1;
+  text-align: center;
+  white-space: nowrap;
+}
+
 .log-console {
   max-height: 320px;
   overflow: auto;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-subtle);
   background: var(--bg-terminal);
-  padding: 14px;
+  padding: 42px 14px 14px;
   color: var(--text-on-terminal);
   font-family:
     Consolas, 'Cascadia Mono', 'SFMono-Regular', ui-monospace, monospace;
@@ -2124,10 +2217,23 @@ textarea {
   line-height: 1.45;
   margin: 0;
   min-height: 220px;
+  overflow-wrap: anywhere;
   tab-size: 2;
+  unicode-bidi: plaintext;
   white-space: pre-wrap;
   word-break: break-word;
   scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+.log-search-match {
+  border-radius: 2px;
+  background: #fde047;
+  color: #111827;
+}
+
+.log-search-match.is-active {
+  background: #fb923c;
+  outline: 1px solid rgba(255, 255, 255, 0.86);
 }
 
 .log-console::-webkit-scrollbar-thumb {

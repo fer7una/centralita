@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import type { RuntimeLogLine } from '../../types'
 import { ProjectLogsPanel } from './ProjectLogsPanel'
@@ -63,5 +63,81 @@ describe('ProjectLogsPanel', () => {
     ])
 
     expect(terminalText).toBe('Progress 100%\n')
+  })
+
+  it('preserves unicode output while applying terminal formatting', () => {
+    const terminalText = prepareTerminalLogText([
+      logLine('😀a é ñ 日本語 عربى ✓', '2026-04-16T07:30:00Z', true),
+    ])
+
+    expect(terminalText).toBe('😀a é ñ 日本語 عربى ✓')
+  })
+
+  it('scrolls to the latest terminal output after new lines render', async () => {
+    const { rerender } = render(<ProjectLogsPanel lines={[logLine('first')]} />)
+    const logConsole = screen.getByRole('log', { name: 'Logs de terminal' })
+
+    Object.defineProperty(logConsole, 'scrollHeight', {
+      configurable: true,
+      value: 720,
+    })
+
+    rerender(
+      <ProjectLogsPanel
+        lines={[logLine('first'), logLine('second', '2026-04-16T07:30:01Z')]}
+      />,
+    )
+
+    await waitFor(() => expect(logConsole.scrollTop).toBe(720))
+  })
+
+  it('opens terminal search with Ctrl+F and searches the whole terminal buffer', async () => {
+    render(
+      <ProjectLogsPanel
+        lines={[
+          logLine('Boot ready'),
+          logLine('Error from dev server', '2026-04-16T07:30:01Z'),
+          logLine('Later error from watcher', '2026-04-16T07:30:02Z'),
+        ]}
+      />,
+    )
+
+    fireEvent.keyDown(window, { ctrlKey: true, key: 'f' })
+    const searchInput = screen.getByRole('searchbox', {
+      name: 'Buscar en logs de terminal',
+    })
+
+    await waitFor(() => expect(searchInput).toHaveFocus())
+
+    fireEvent.change(searchInput, { target: { value: 'error' } })
+
+    expect(screen.getByText('1/2')).toBeInTheDocument()
+    expect(document.querySelectorAll('.log-search-match')).toHaveLength(2)
+
+    fireEvent.click(screen.getByLabelText('Coincidencia siguiente'))
+
+    expect(screen.getByText('2/2')).toBeInTheDocument()
+  })
+
+  it('searches terminal output by unicode characters', () => {
+    render(
+      <ProjectLogsPanel
+        lines={[
+          logLine(
+            '\u00bf\u00e1\u00e9\u00ed\u00f3\u00fa\u00f1',
+            '2026-04-16T07:30:00Z',
+          ),
+        ]}
+      />,
+    )
+
+    fireEvent.click(screen.getByLabelText('Buscar en logs de terminal'))
+    fireEvent.change(
+      screen.getByRole('searchbox', { name: 'Buscar en logs de terminal' }),
+      { target: { value: '\u00f1' } },
+    )
+
+    expect(screen.getByText('1/1')).toBeInTheDocument()
+    expect(document.querySelectorAll('.log-search-match')).toHaveLength(1)
   })
 })

@@ -9,6 +9,9 @@ use std::{
     time::Duration,
 };
 
+#[cfg(windows)]
+use std::ffi::c_char;
+
 use crate::{
     detection::resolve_executable,
     events::{
@@ -30,6 +33,25 @@ use crate::{
 const EXIT_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const DEFAULT_LOG_BUFFER_LIMIT: usize = 500;
 const LOG_READ_BUFFER_SIZE: usize = 4096;
+
+#[cfg(windows)]
+const WINDOWS_COMMON_LOG_CODE_PAGES: [u32; 3] = [850, 437, 1252];
+
+#[cfg(windows)]
+#[link(name = "kernel32")]
+extern "system" {
+    fn GetACP() -> u32;
+    fn GetConsoleOutputCP() -> u32;
+    fn GetOEMCP() -> u32;
+    fn MultiByteToWideChar(
+        code_page: u32,
+        flags: u32,
+        multi_byte_str: *const c_char,
+        multi_byte_len: i32,
+        wide_char_str: *mut u16,
+        wide_char_len: i32,
+    ) -> i32;
+}
 
 #[derive(Clone)]
 pub struct ProcessManager {
@@ -735,14 +757,16 @@ fn emit_complete_log_text(
             Err(error) => {
                 let valid_up_to = error.valid_up_to();
                 if valid_up_to > 0 {
-                    let text = String::from_utf8_lossy(&pending_bytes[..valid_up_to]).into_owned();
+                    let text = std::str::from_utf8(&pending_bytes[..valid_up_to])
+                        .expect("valid_up_to must describe valid UTF-8")
+                        .to_owned();
                     pending_bytes.drain(..valid_up_to);
                     emit_log_chunk(processes, event_emitter, project_id, stream, text);
                     continue;
                 }
 
                 if let Some(error_len) = error.error_len() {
-                    let text = String::from_utf8_lossy(&pending_bytes[..error_len]).into_owned();
+                    let text = decode_non_utf8_log_bytes(&pending_bytes[..error_len]);
                     pending_bytes.drain(..error_len);
                     emit_log_chunk(processes, event_emitter, project_id, stream, text);
                     continue;
@@ -765,9 +789,126 @@ fn flush_pending_log_bytes(
         return;
     }
 
-    let text = String::from_utf8_lossy(pending_bytes).into_owned();
+    let text = decode_log_bytes(pending_bytes);
     pending_bytes.clear();
     emit_log_chunk(processes, event_emitter, project_id, stream, text);
+}
+
+fn decode_log_bytes(bytes: &[u8]) -> String {
+    std::str::from_utf8(bytes)
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|_| decode_non_utf8_log_bytes(bytes))
+}
+
+#[cfg(windows)]
+fn decode_non_utf8_log_bytes(bytes: &[u8]) -> String {
+    decode_windows_best_effort(bytes).unwrap_or_else(|| String::from_utf8_lossy(bytes).into_owned())
+}
+
+#[cfg(not(windows))]
+fn decode_non_utf8_log_bytes(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes).into_owned()
+}
+
+#[cfg(windows)]
+fn decode_windows_best_effort(bytes: &[u8]) -> Option<String> {
+    let mut code_pages = Vec::new();
+
+    for code_page in windows_log_code_pages() {
+        if code_page != 0 && !code_pages.contains(&code_page) {
+            code_pages.push(code_page);
+        }
+    }
+
+    code_pages
+        .into_iter()
+        .filter_map(|code_page| {
+            decode_windows_code_page(bytes, code_page)
+                .map(|text| (score_decoded_log_text(&text), text))
+        })
+        .max_by_key(|(score, _)| *score)
+        .map(|(_, text)| text)
+}
+
+#[cfg(windows)]
+fn windows_log_code_pages() -> Vec<u32> {
+    let mut code_pages = Vec::new();
+
+    unsafe {
+        code_pages.push(GetConsoleOutputCP());
+        code_pages.push(GetOEMCP());
+        code_pages.push(GetACP());
+    }
+
+    code_pages.extend(WINDOWS_COMMON_LOG_CODE_PAGES);
+    code_pages
+}
+
+#[cfg(windows)]
+fn decode_windows_code_page(bytes: &[u8], code_page: u32) -> Option<String> {
+    if bytes.is_empty() {
+        return Some(String::new());
+    }
+
+    let input_len = i32::try_from(bytes.len()).ok()?;
+    let wide_len = unsafe {
+        MultiByteToWideChar(
+            code_page,
+            0,
+            bytes.as_ptr().cast::<c_char>(),
+            input_len,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+
+    if wide_len <= 0 {
+        return None;
+    }
+
+    let mut wide_chars = vec![0_u16; wide_len as usize];
+    let written_len = unsafe {
+        MultiByteToWideChar(
+            code_page,
+            0,
+            bytes.as_ptr().cast::<c_char>(),
+            input_len,
+            wide_chars.as_mut_ptr(),
+            wide_len,
+        )
+    };
+
+    if written_len <= 0 {
+        return None;
+    }
+
+    wide_chars.truncate(written_len as usize);
+    String::from_utf16(&wide_chars).ok()
+}
+
+#[cfg(windows)]
+fn score_decoded_log_text(text: &str) -> i32 {
+    text.chars().map(score_decoded_log_character).sum()
+}
+
+#[cfg(windows)]
+fn score_decoded_log_character(character: char) -> i32 {
+    match character {
+        '\u{fffd}' => -100,
+        '\r' | '\n' | '\t' => 1,
+        'á' | 'é' | 'í' | 'ó' | 'ú' | 'Á' | 'É' | 'Í' | 'Ó' | 'Ú' | 'ñ' | 'Ñ' | 'ü' | 'Ü' => {
+            10
+        }
+        '¿' | '¡' => 8,
+        '\u{00a0}' | '¤' | '¢' | '£' | '¥' | '¦' | '§' | '¨' | '¬' | '¯' => -4,
+        '─'..='╿' => -6,
+        character if character.is_control() => -20,
+        character if character.is_ascii_alphanumeric() || character == ' ' => 3,
+        character if character.is_alphabetic() || character.is_numeric() => 3,
+        character if character.is_ascii_punctuation() => 1,
+        character if character.is_whitespace() => 1,
+        _ => 0,
+    }
 }
 
 fn emit_log_chunk(
@@ -1376,6 +1517,70 @@ mod tests {
             .expect("split UTF-8 output should be reassembled");
 
         assert_eq!(logs, expected_output);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn decodes_common_windows_spanish_log_code_pages() {
+        assert_eq!(
+            super::decode_windows_best_effort(&[0xa8, 0xa0, 0x82, 0xa1, 0xa2, 0xa3, 0xa4])
+                .as_deref(),
+            Some("¿áéíóúñ")
+        );
+        assert_eq!(
+            super::decode_windows_best_effort(&[0xbf, 0xe1, 0xe9, 0xed, 0xf3, 0xfa, 0xf1])
+                .as_deref(),
+            Some("¿áéíóúñ")
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn captures_windows_oem_accent_bytes_in_the_log_buffer() {
+        let project = base_project("project-windows-oem-output");
+        let manager =
+            ProcessManager::with_event_emitter_and_capacity(noop_runtime_event_emitter(), 10);
+
+        {
+            let mut processes = super::lock_mutex(&manager.processes);
+            processes.insert(
+                project.id.clone(),
+                ManagedProcess {
+                    state: crate::runtime::initial_process_state(project.id.clone(), "test"),
+                    child: None,
+                    history_entry_id: None,
+                    logs: LogBuffer::new(100),
+                },
+            );
+        }
+
+        spawn_log_pump(
+            manager.processes.clone(),
+            manager.event_emitter.clone(),
+            project.id.clone(),
+            crate::models::RuntimeLogStream::Stdout,
+            Cursor::new(vec![0xa8, 0xa0, 0x82, 0xa1, 0xa2, 0xa3, 0xa4]),
+        );
+
+        let output = (0..100)
+            .find_map(|_| {
+                let output = manager
+                    .get_logs(&project.id)
+                    .iter()
+                    .map(|line| line.line.as_str())
+                    .collect::<Vec<_>>()
+                    .join("");
+
+                if output == "¿áéíóúñ" {
+                    Some(output)
+                } else {
+                    thread::sleep(POLL_INTERVAL);
+                    None
+                }
+            })
+            .expect("Windows OEM encoded output should be decoded");
+
+        assert_eq!(output, "¿áéíóúñ");
     }
 
     #[test]

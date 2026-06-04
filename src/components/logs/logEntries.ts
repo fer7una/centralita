@@ -69,16 +69,20 @@ function skipOperatingSystemCommand(value: string, startIndex: number) {
 }
 
 function applyTerminalControlCharacters(value: string) {
-  const rows = ['']
+  const rows: string[][] = [[]]
   let rowIndex = 0
   let columnIndex = 0
 
   for (const character of value) {
-    const code = character.charCodeAt(0)
+    const code = character.codePointAt(0)
+
+    if (code === undefined) {
+      continue
+    }
 
     if (code === 10) {
       rowIndex += 1
-      rows[rowIndex] = rows[rowIndex] ?? ''
+      rows[rowIndex] = rows[rowIndex] ?? []
       columnIndex = 0
       continue
     }
@@ -90,27 +94,28 @@ function applyTerminalControlCharacters(value: string) {
 
     if (code === 8) {
       if (columnIndex > 0) {
-        const currentRow = rows[rowIndex] ?? ''
-        rows[rowIndex] =
-          currentRow.slice(0, columnIndex - 1) + currentRow.slice(columnIndex)
+        const currentRow = rows[rowIndex] ?? []
+        rows[rowIndex] = currentRow
+        currentRow.splice(columnIndex - 1, 1)
         columnIndex -= 1
       }
       continue
     }
 
     if (code === 9 || code >= 32) {
-      const currentRow = rows[rowIndex] ?? ''
-      rows[rowIndex] =
-        currentRow.length > columnIndex
-          ? `${currentRow.slice(0, columnIndex)}${character}${currentRow.slice(
-              columnIndex + 1,
-            )}`
-          : `${currentRow.padEnd(columnIndex, ' ')}${character}`
+      const currentRow = rows[rowIndex] ?? []
+      rows[rowIndex] = currentRow
+
+      while (currentRow.length < columnIndex) {
+        currentRow.push(' ')
+      }
+
+      currentRow[columnIndex] = character
       columnIndex += 1
     }
   }
 
-  return rows.join('\n')
+  return rows.map((row) => row.join('')).join('\n')
 }
 
 function toTerminalText(lines: RuntimeLogLine[]) {
@@ -128,7 +133,9 @@ function toTerminalText(lines: RuntimeLogLine[]) {
   }, '')
 }
 
-function toPreparedLogLines(lines: RuntimeLogLine[]): PreparedLogLine[] {
+export function prepareTerminalLogLines(
+  lines: RuntimeLogLine[],
+): PreparedLogLine[] {
   const terminalText = applyTerminalControlCharacters(
     stripTerminalSequences(toTerminalText(lines)),
   )
@@ -141,11 +148,11 @@ function toPreparedLogLines(lines: RuntimeLogLine[]): PreparedLogLine[] {
 }
 
 export function countLogLinesInMemory(lines: RuntimeLogLine[]) {
-  return toPreparedLogLines(lines).length
+  return prepareTerminalLogLines(lines).length
 }
 
 export function prepareTerminalLogText(lines: RuntimeLogLine[]) {
-  return toPreparedLogLines(lines)
+  return prepareTerminalLogLines(lines)
     .map((line) => line.line)
     .join('\n')
 }
