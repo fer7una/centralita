@@ -65,6 +65,7 @@ import type {
   CommandValidation,
   DetectionResult,
   DetectedProjectType,
+  EnvironmentVariables,
   GroupTreeNode,
   ProcessRuntimeState,
   ProjectGitInfo,
@@ -118,11 +119,16 @@ const MAX_NAVIGATION_HISTORY_ENTRIES = 100
 const MOUSE_NAVIGATION_BACK_BUTTON = 3
 const MOUSE_NAVIGATION_FORWARD_BUTTON = 4
 const MOUSE_NAVIGATION_DEDUPE_WINDOW_MS = 250
+const JAVA_TRUSTSTORE_ENV_PLACEHOLDER = [
+  'JAVA_HOME=C:\\Program Files\\Java\\jdk-17',
+  'JAVA_TOOL_OPTIONS=-Djavax.net.ssl.trustStore=C:\\Program Files\\Java\\jdk-17\\lib\\security\\cacerts',
+].join('\n')
 
 type DetectionReviewDraft = {
   argsText: string
   confidence: number
   detectedType: DetectedProjectType
+  envText: string
   evidence: DetectionResult['evidence']
   executable: string
   groupId: string
@@ -153,6 +159,7 @@ type GroupDetailDraft = {
 
 type ProjectDetailDraft = {
   argsText: string
+  envText: string
   executable: string
   name: string
   path: string
@@ -192,6 +199,11 @@ type RuntimeErrorHistoryItem = {
   message: string
   occurredAt: string | null
   source: 'current' | 'history'
+}
+
+type EnvironmentVariablesParseResult = {
+  env: EnvironmentVariables
+  issues: string[]
 }
 
 type ProjectGroupSection = {
@@ -257,6 +269,7 @@ function createReviewDraft(
     argsText: result.args.join('\n'),
     confidence: result.confidence,
     detectedType: result.detectedType,
+    envText: '',
     evidence: result.evidence,
     executable: result.executable ?? '',
     groupId: defaultGroupId,
@@ -276,6 +289,7 @@ function createGroupDraft(name: string): GroupDetailDraft {
 function createProjectDraft(project: ProjectNode): ProjectDetailDraft {
   return {
     argsText: project.args?.join('\n') ?? '',
+    envText: formatEnvironmentVariablesInput(project.env),
     executable: project.executable ?? '',
     name: project.name,
     path: normalizeWindowsPath(project.path),
@@ -288,6 +302,62 @@ function parseArgsInput(argsText: string) {
     .split('\n')
     .map((value) => value.trim())
     .filter(Boolean)
+}
+
+function formatEnvironmentVariablesInput(env?: EnvironmentVariables | null) {
+  return Object.entries(env ?? {})
+    .sort(([leftKey], [rightKey]) =>
+      leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0,
+    )
+    .map(([key, value]) => `${key}=${value}`)
+    .join('\n')
+}
+
+function parseEnvironmentVariablesInput(
+  envText: string,
+): EnvironmentVariablesParseResult {
+  const env: EnvironmentVariables = {}
+  const issues: string[] = []
+  const seenKeys = new Set<string>()
+
+  envText.split('\n').forEach((rawLine, index) => {
+    const line = rawLine.trim()
+    if (!line) {
+      return
+    }
+
+    const separatorIndex = line.indexOf('=')
+    if (separatorIndex < 1) {
+      issues.push(`Linea ${index + 1}: usa NOMBRE=valor.`)
+      return
+    }
+
+    const key = line.slice(0, separatorIndex).trim()
+    const value = line.slice(separatorIndex + 1).trim()
+    if (!key) {
+      issues.push(`Linea ${index + 1}: el nombre no puede estar vacio.`)
+      return
+    }
+    if (/\s/.test(key)) {
+      issues.push(`Linea ${index + 1}: el nombre no puede contener espacios.`)
+      return
+    }
+
+    const normalizedKey = key.toUpperCase()
+    if (seenKeys.has(normalizedKey)) {
+      issues.push(`Linea ${index + 1}: variable "${key}" duplicada.`)
+      return
+    }
+
+    seenKeys.add(normalizedKey)
+    env[key] = value
+  })
+
+  return { env, issues }
+}
+
+function hasEnvironmentVariables(env: EnvironmentVariables) {
+  return Object.keys(env).length > 0
 }
 
 function areStringArraysEqual(left: string[], right: string[]) {
@@ -1293,6 +1363,9 @@ function CentralitaApp() {
         parseArgsInput(reviewDraft.argsText),
       )
     : 'Manual review required'
+  const reviewEnvParseResult = reviewDraft
+    ? parseEnvironmentVariablesInput(reviewDraft.envText)
+    : { env: {}, issues: [] }
   const projectCommand =
     selectedProject && projectDetailValue
       ? projectCommandPreview(
@@ -1337,12 +1410,14 @@ function CentralitaApp() {
           ? 'Escribe un nombre para el proyecto.'
           : !cleanPathInput(reviewDraft.path)
             ? 'Indica la ruta del proyecto.'
-            : isReviewValidationPending
-              ? 'Espera a que termine la validación del comando.'
-              : !reviewDraft.commandValidation.isRunnable
-                ? (reviewDraft.commandValidation.issues[0] ??
-                  'El comando propuesto no supera la validación.')
-                : undefined
+            : reviewEnvParseResult.issues.length > 0
+              ? reviewEnvParseResult.issues[0]
+              : isReviewValidationPending
+                ? 'Espera a que termine la validación del comando.'
+                : !reviewDraft.commandValidation.isRunnable
+                  ? (reviewDraft.commandValidation.issues[0] ??
+                    'El comando propuesto no supera la validación.')
+                  : undefined
   const canSaveDetectionProject = !saveDetectionProjectBlockedReason
   const selectedGroupProjectCount = selectedGroup
     ? flattenProjects([selectedGroup]).length
@@ -1381,6 +1456,9 @@ function CentralitaApp() {
   const projectDraftArgs = projectDetailValue
     ? parseArgsInput(projectDetailValue.argsText)
     : []
+  const projectEnvParseResult = projectDetailValue
+    ? parseEnvironmentVariablesInput(projectDetailValue.envText)
+    : { env: {}, issues: [] }
   const originalProjectPath = selectedProject
     ? cleanPathInput(selectedProject.path)
     : ''
@@ -1389,6 +1467,13 @@ function CentralitaApp() {
     : ''
   const originalProjectExecutable = selectedProject?.executable?.trim() ?? ''
   const originalProjectArgs = selectedProject?.args ?? []
+  const originalProjectEnvText = selectedProject
+    ? formatEnvironmentVariablesInput(selectedProject.env)
+    : ''
+  const projectEnvHasPendingChanges = Boolean(
+    projectDetailValue &&
+      projectDetailValue.envText.trim() !== originalProjectEnvText.trim(),
+  )
   const projectHasPendingChanges = Boolean(
     selectedProject &&
     projectDetailValue &&
@@ -1396,7 +1481,8 @@ function CentralitaApp() {
       projectDraftPath !== originalProjectPath ||
       projectDraftWorkingDir !== originalProjectWorkingDir ||
       projectDraftExecutable !== originalProjectExecutable ||
-      !areStringArraysEqual(projectDraftArgs, originalProjectArgs)),
+      !areStringArraysEqual(projectDraftArgs, originalProjectArgs) ||
+      projectEnvHasPendingChanges),
   )
   const saveProjectBlockedReason = !selectedProject
     ? 'No hay proyecto seleccionado.'
@@ -1406,9 +1492,11 @@ function CentralitaApp() {
         ? 'Escribe un nombre para el proyecto.'
         : !projectDraftPath
           ? 'Indica la ruta del proyecto.'
-          : !projectHasPendingChanges
-            ? 'El proyecto no tiene cambios pendientes.'
-            : undefined
+          : projectEnvParseResult.issues.length > 0
+            ? projectEnvParseResult.issues[0]
+            : !projectHasPendingChanges
+              ? 'El proyecto no tiene cambios pendientes.'
+              : undefined
   const canSaveProject = !saveProjectBlockedReason
   const startWorkspaceBlockedReason =
     allProjects.length === 0
@@ -1736,6 +1824,9 @@ function CentralitaApp() {
             executable: reviewDraft.executable.trim() || null,
             command: nextCommand,
             args: args.length > 0 ? args : undefined,
+            ...(hasEnvironmentVariables(reviewEnvParseResult.env)
+              ? { env: reviewEnvParseResult.env }
+              : {}),
             workingDir: cleanPathInput(reviewDraft.workingDir) || null,
             detectionConfidence: reviewDraft.confidence,
             detectionEvidence: reviewDraft.evidence,
@@ -1910,6 +2001,22 @@ function CentralitaApp() {
                 }
                 rows={4}
                 value={reviewDraft.argsText}
+              />
+            </label>
+
+            <label className="field full-width">
+              <span>Variables de entorno (KEY=VALUE por linea)</span>
+              <textarea
+                onChange={(event) =>
+                  setReviewDraft((current) =>
+                    current
+                      ? { ...current, envText: event.target.value }
+                      : current,
+                  )
+                }
+                placeholder={JAVA_TRUSTSTORE_ENV_PLACEHOLDER}
+                rows={4}
+                value={reviewDraft.envText}
               />
             </label>
           </div>
@@ -3031,6 +3138,9 @@ function CentralitaApp() {
                       ? null
                       : nextCommand,
                   executable: executable || null,
+                  ...(projectEnvHasPendingChanges
+                    ? { env: projectEnvParseResult.env }
+                    : {}),
                   name: projectDetailValue.name.trim(),
                   path: cleanPathInput(projectDetailValue.path),
                   workingDir:
@@ -3111,6 +3221,23 @@ function CentralitaApp() {
                 }
                 rows={4}
                 value={projectDetailValue.argsText}
+              />
+            </label>
+            <label className="field full-width">
+              <span>Variables de entorno (KEY=VALUE por linea)</span>
+              <textarea
+                onChange={(event) =>
+                  setProjectDetailDraft({
+                    draft: {
+                      ...projectDetailValue,
+                      envText: event.target.value,
+                    },
+                    projectId: selectedProject.id,
+                  })
+                }
+                placeholder={JAVA_TRUSTSTORE_ENV_PLACEHOLDER}
+                rows={4}
+                value={projectDetailValue.envText}
               />
             </label>
             <article className="info-card full-width">

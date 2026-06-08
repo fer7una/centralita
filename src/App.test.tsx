@@ -883,11 +883,25 @@ describe('CentralitaApp', () => {
       screen.getByRole('dialog', { name: 'Revisar detección' }),
     ).toBeInTheDocument()
 
+    fireEvent.change(
+      within(reviewDialog).getByLabelText(/Variables de entorno/),
+      {
+        target: {
+          value:
+            'JAVA_HOME=C:\\Program Files\\Java\\jdk-17\nJAVA_TOOL_OPTIONS=-Djavax.net.ssl.trustStore=C:\\Program Files\\Java\\jdk-17\\lib\\security\\cacerts -Djavax.net.ssl.trustStoreType=JKS',
+        },
+      },
+    )
     fireEvent.click(screen.getByRole('button', { name: 'Guardar proyecto' }))
 
     await waitFor(() => {
       expect(workspaceApi.createProjectFromDetection).toHaveBeenCalledWith(
         expect.objectContaining({
+          env: {
+            JAVA_HOME: 'C:\\Program Files\\Java\\jdk-17',
+            JAVA_TOOL_OPTIONS:
+              '-Djavax.net.ssl.trustStore=C:\\Program Files\\Java\\jdk-17\\lib\\security\\cacerts -Djavax.net.ssl.trustStoreType=JKS',
+          },
           groupId: 'group-frontend',
           name: 'centralita-ui',
           workspaceId: 'workspace-main',
@@ -1286,6 +1300,61 @@ describe('CentralitaApp', () => {
           executable: 'npm',
           path: 'C:\\Proyectos\\centralita-ui-renamed',
           workingDir: 'C:\\Proyectos\\centralita-ui',
+        }),
+      )
+    })
+  })
+
+  it('saves project environment variables from the project editor', async () => {
+    render(<CentralitaApp />)
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Expandir Frontend' }),
+    )
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Abrir proyecto centralita-ui',
+      }),
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Configurar proyecto' }))
+    const projectDialog = await screen.findByRole('dialog', {
+      name: 'Configuración del proyecto',
+    })
+    const saveButton = within(projectDialog).getByRole('button', {
+      name: 'Guardar proyecto',
+    })
+
+    expect(saveButton).toBeDisabled()
+
+    fireEvent.change(
+      within(projectDialog).getByLabelText(/Variables de entorno/),
+      {
+        target: {
+          value:
+            'JAVA_HOME=C:\\Program Files\\Java\\jdk-17\nJAVA_TOOL_OPTIONS=-Djavax.net.ssl.trustStore=C:\\Program Files\\Java\\jdk-17\\lib\\security\\cacerts -Djavax.net.ssl.trustStoreType=JKS',
+        },
+      },
+    )
+    await waitFor(() => {
+      expect(
+        within(projectDialog).getByRole('button', {
+          name: 'Guardar proyecto',
+        }),
+      ).toBeEnabled()
+    })
+    fireEvent.click(
+      within(projectDialog).getByRole('button', { name: 'Guardar proyecto' }),
+    )
+
+    await waitFor(() => {
+      expect(workspaceApi.updateProject).toHaveBeenCalledWith(
+        expect.objectContaining({
+          env: {
+            JAVA_HOME: 'C:\\Program Files\\Java\\jdk-17',
+            JAVA_TOOL_OPTIONS:
+              '-Djavax.net.ssl.trustStore=C:\\Program Files\\Java\\jdk-17\\lib\\security\\cacerts -Djavax.net.ssl.trustStoreType=JKS',
+          },
+          id: 'project-ui',
         }),
       )
     })
