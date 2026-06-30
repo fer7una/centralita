@@ -585,6 +585,21 @@ function shouldShowProjectStatusCard(
   return status === statusFilter || status === 'FAILED'
 }
 
+function projectMatchesSearchQuery(
+  project: ProjectNode,
+  normalizedQuery: string,
+) {
+  if (!normalizedQuery) {
+    return true
+  }
+
+  const directory = normalizeWindowsPath(project.workingDir ?? project.path)
+
+  return [project.name, directory].some((value) =>
+    value.toLowerCase().includes(normalizedQuery),
+  )
+}
+
 function sortProjectStatusCards(
   projects: ProjectNode[],
   sortMode: ProjectListSortMode,
@@ -752,6 +767,7 @@ function CentralitaApp() {
     useState<ProjectListSortMode>('STATUS')
   const [projectListStatusFilter, setProjectListStatusFilter] =
     useState<RuntimeStatus | null>(null)
+  const [projectListSearchQuery, setProjectListSearchQuery] = useState('')
   const [reviewDraft, setReviewDraft] = useState<DetectionReviewDraft | null>(
     null,
   )
@@ -2144,6 +2160,18 @@ function CentralitaApp() {
   function renderProjectStatusControls(effectiveStatusFilter: RuntimeStatus) {
     return (
       <div className="workspace-project-status-controls">
+        <label className="field workspace-project-status-control workspace-project-status-search">
+          <span>Buscar</span>
+          <input
+            onChange={(event) =>
+              setProjectListSearchQuery(event.target.value)
+            }
+            placeholder="Nombre o directorio"
+            type="search"
+            value={projectListSearchQuery}
+          />
+        </label>
+
         <label className="field workspace-project-status-control">
           <span>Mostrar</span>
           <select
@@ -2233,13 +2261,15 @@ function CentralitaApp() {
       runtimeStore.statusByProjectId,
     )
     const effectiveStatusFilter = projectListStatusFilter ?? defaultStatusFilter
-    const visibleProjects = projects.filter((project) =>
-      shouldShowProjectStatusCard(
-        project,
-        projectListDisplayMode,
-        effectiveStatusFilter,
-        runtimeStore.statusByProjectId,
-      ),
+    const normalizedSearchQuery = projectListSearchQuery.trim().toLowerCase()
+    const visibleProjects = projects.filter(
+      (project) =>
+        shouldShowProjectStatusCard(
+          project,
+          projectListDisplayMode,
+          effectiveStatusFilter,
+          runtimeStore.statusByProjectId,
+        ) && projectMatchesSearchQuery(project, normalizedSearchQuery),
     )
     const sortedProjects =
       projectListGroupMode === 'NONE'

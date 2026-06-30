@@ -1752,8 +1752,13 @@ textarea {
   flex: 1 1 150px;
 }
 
-.workspace-project-status-control select {
+.workspace-project-status-control select,
+.workspace-project-status-control input {
   min-height: 42px;
+}
+
+.workspace-project-status-search {
+  flex: 1 1 100%;
 }
 
 .workspace-project-status-list,
