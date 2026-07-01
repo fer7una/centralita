@@ -131,6 +131,27 @@ function clearSavedProjectRuntimeSnapshot(
   }
 }
 
+function clearProjectRuntimeView(current: RuntimeState, projectId: string) {
+  const snapshot = current.statusByProjectId[projectId]
+  const nextStatusByProjectId = { ...current.statusByProjectId }
+  const nextLogsByProjectId = { ...current.logsByProjectId }
+  const nextHistoryByProjectId = { ...current.historyByProjectId }
+
+  nextLogsByProjectId[projectId] = []
+
+  if (!snapshot || !isActiveRuntimeStatus(snapshot.status)) {
+    delete nextStatusByProjectId[projectId]
+    nextHistoryByProjectId[projectId] = []
+  }
+
+  return {
+    ...current,
+    historyByProjectId: nextHistoryByProjectId,
+    logsByProjectId: nextLogsByProjectId,
+    statusByProjectId: nextStatusByProjectId,
+  }
+}
+
 async function syncWorkspaceRuntimeState(
   activeWorkspaceId: string | null,
   projectIds: string[],
@@ -533,18 +554,13 @@ export function useRuntimeStore(
         setState((current) =>
           clearSavedProjectRuntimeSnapshot(current, projectId),
         ),
-      clearSelectedLogs: () => {
+      clearSelectedRuntimeView: () => {
         if (!state.selectedProjectId) {
           return
         }
 
-        setState((current) => ({
-          ...current,
-          logsByProjectId: {
-            ...current.logsByProjectId,
-            [state.selectedProjectId!]: [],
-          },
-        }))
+        const projectId = state.selectedProjectId
+        setState((current) => clearProjectRuntimeView(current, projectId))
       },
       selectProject: (projectId: string) =>
         setState((current) =>

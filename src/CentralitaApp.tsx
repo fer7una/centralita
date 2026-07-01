@@ -1576,8 +1576,18 @@ function CentralitaApp() {
         ? undefined
         : 'El proyecto debe estar detenido o fallido.'
   const canReloadProject = !reloadProjectBlockedReason
+  const hasClearableRuntimeState =
+    selectedRuntimeState !== null &&
+    (projectStatus === 'STOPPED' || projectStatus === 'FAILED') &&
+    (selectedRuntimeState.pid != null ||
+      selectedRuntimeState.startedAt != null ||
+      selectedRuntimeState.stoppedAt != null ||
+      selectedRuntimeState.exitCode != null ||
+      Boolean(selectedRuntimeState.lastError))
   const clearProjectLogsBlockedReason =
-    selectedRuntimeLogs.length > 0
+    selectedRuntimeLogs.length > 0 ||
+    selectedRunHistory.length > 0 ||
+    hasClearableRuntimeState
       ? undefined
       : 'No hay logs para limpiar en la vista.'
   const canClearProjectLogs = !clearProjectLogsBlockedReason
@@ -2763,7 +2773,7 @@ function CentralitaApp() {
               blockedReason={clearProjectLogsBlockedReason}
               className="icon-button"
               disabled={!canClearProjectLogs}
-              onClick={() => runtimeStore.actions.clearSelectedLogs()}
+              onClick={() => runtimeStore.actions.clearSelectedRuntimeView()}
               title="Limpiar vista"
               type="button"
             >

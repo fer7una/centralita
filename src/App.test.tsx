@@ -1766,6 +1766,96 @@ describe('CentralitaApp', () => {
     expect(within(dialog).getByText('Historial')).toBeInTheDocument()
   })
 
+  it('clears runtime state, logs, and visible history when the project is not running', async () => {
+    vi.mocked(workspaceApi.listWorkspaces).mockResolvedValue([
+      workspace,
+      workspaceOps,
+    ])
+    vi.mocked(workspaceApi.getWorkspaceTree).mockImplementation(
+      async (workspaceId: string) =>
+        workspaceId === 'workspace-ops' ? workspaceOpsTree : workspaceTree,
+    )
+    vi.mocked(runtimeApi.getWorkspaceRuntimeStatus).mockResolvedValue({
+      workspaceId: 'workspace-main',
+      status: 'FAILED' as const,
+      projects: [
+        {
+          projectId: 'project-ui',
+          status: 'FAILED' as const,
+          pid: null,
+          startedAt: '2026-04-16T07:29:00Z',
+          stoppedAt: '2026-04-16T07:30:00Z',
+          exitCode: 1,
+          lastError: 'Failed to start project',
+          commandPreview: 'pnpm dev',
+        },
+      ],
+    })
+    vi.mocked(runtimeApi.getProjectLogs).mockResolvedValue([
+      {
+        projectId: 'project-ui',
+        stream: 'stderr',
+        line: 'Build failed while cleaning view',
+        timestamp: '2026-04-16T07:30:00Z',
+      },
+    ])
+    vi.mocked(runtimeApi.listProjectRunHistory).mockResolvedValue([
+      {
+        id: 'history-clear-view',
+        projectId: 'project-ui',
+        startedAt: '2026-04-16T07:29:00Z',
+        endedAt: '2026-04-16T07:30:00Z',
+        exitCode: 1,
+        finalRuntimeStatus: 'FAILED' as const,
+        stopReason: 'process exited',
+        errorMessage: 'Build failed while cleaning view',
+        commandPreview: 'pnpm dev',
+      },
+    ])
+
+    render(<CentralitaApp />)
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Expandir Frontend' }),
+    )
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Abrir proyecto centralita-ui',
+      }),
+    )
+
+    expect(
+      await screen.findByText('Build failed while cleaning view'),
+    ).toBeInTheDocument()
+    expect(screen.getByText('1 ejecuciones')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Limpiar vista' }))
+
+    await waitFor(() => {
+      const runtimePanel = screen
+        .getByRole('heading', { name: 'Runtime' })
+        .closest('article')
+
+      expect(runtimePanel).not.toBeNull()
+      const runtimeErrorRow = within(runtimePanel!)
+        .getByText(/error runtime/i)
+        .closest('li')
+
+      expect(runtimeErrorRow).not.toBeNull()
+      expect(
+        screen.queryByText('Build failed while cleaning view'),
+      ).not.toBeInTheDocument()
+      expect(
+        within(runtimeErrorRow!).getByText('Sin errores registrados'),
+      ).toBeInTheDocument()
+      expect(screen.getByText(/no hay logs/i)).toBeInTheDocument()
+      expect(screen.getByText('0 ejecuciones')).toBeInTheDocument()
+      expect(
+        screen.getByText(/no hay ejecuciones registradas/i),
+      ).toBeInTheDocument()
+    })
+  })
+
   it('clears stale runtime error and logs before a new start attempt', async () => {
     const failedRuntime = {
       workspaceId: 'workspace-main',
