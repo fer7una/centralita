@@ -15,6 +15,7 @@ import {
   MinusCircle,
   Play,
   Plus,
+  RefreshCw,
   RotateCcw,
   Settings2,
   Square,
@@ -773,6 +774,9 @@ function CentralitaApp() {
   )
   const [isReviewValidationPending, setIsReviewValidationPending] =
     useState(false)
+  const [reloadingProjectId, setReloadingProjectId] = useState<string | null>(
+    null,
+  )
   const reviewValidationRequestIdRef = useRef(0)
   const [projectGitInfoState, setProjectGitInfoState] = useState<{
     info: ProjectGitInfo | null
@@ -1564,6 +1568,14 @@ function CentralitaApp() {
         ? 'El proyecto se está deteniendo.'
         : undefined
   const canRestartProject = !restartProjectBlockedReason
+  const reloadProjectBlockedReason = !selectedProject
+    ? 'No hay proyecto seleccionado.'
+    : reloadingProjectId === selectedProject.id
+      ? 'El proyecto ya se esta recargando.'
+      : projectStatus === 'STOPPED' || projectStatus === 'FAILED'
+        ? undefined
+        : 'El proyecto debe estar detenido o fallido.'
+  const canReloadProject = !reloadProjectBlockedReason
   const clearProjectLogsBlockedReason =
     selectedRuntimeLogs.length > 0
       ? undefined
@@ -1808,6 +1820,30 @@ function CentralitaApp() {
       },
       { recordHistory: true },
     )
+  }
+
+  async function handleReloadSelectedProject() {
+    if (!selectedProject || reloadProjectBlockedReason) {
+      return
+    }
+
+    const projectId = selectedProject.id
+    setReloadingProjectId(projectId)
+
+    try {
+      const reloadedProject =
+        await workspaceStore.actions.reloadProjectFromDetection(projectId)
+      runtimeStore.actions.clearSavedProjectRuntimeSnapshot(projectId)
+      if (reloadedProject) {
+        await handleSelectProject(reloadedProject.id, reloadedProject.workspaceId)
+      }
+    } catch {
+      // Workspace store exposes the failure through the error banner.
+    } finally {
+      setReloadingProjectId((current) =>
+        current === projectId ? null : current,
+      )
+    }
   }
 
   function renderDetectionReviewModal() {
@@ -2706,6 +2742,21 @@ function CentralitaApp() {
               type="button"
             >
               <RotateCcw aria-hidden="true" size={18} />
+            </BlockedActionButton>
+            <BlockedActionButton
+              aria-label="Recargar proyecto"
+              blockedReason={reloadProjectBlockedReason}
+              className="icon-button"
+              disabled={!canReloadProject}
+              onClick={() => void handleReloadSelectedProject()}
+              title="Recargar proyecto"
+              type="button"
+            >
+              {reloadingProjectId === selectedProject.id ? (
+                <Loader2 aria-hidden="true" size={18} />
+              ) : (
+                <RefreshCw aria-hidden="true" size={18} />
+              )}
             </BlockedActionButton>
             <BlockedActionButton
               aria-label="Limpiar vista"

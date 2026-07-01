@@ -19,6 +19,7 @@ export const TAURI_COMMANDS = {
   listWorkspaceRunHistory: 'list_workspace_run_history',
   listWorkspaces: 'list_workspaces',
   renameWorkspace: 'rename_workspace',
+  reloadProjectFromDetection: 'reload_project_from_detection',
   restartProject: 'restart_project',
   startGroup: 'start_group',
   startProject: 'start_project',

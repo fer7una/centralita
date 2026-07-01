@@ -240,6 +240,10 @@ export interface DeleteEntityInput {
   id: EntityId
 }
 
+export interface ReloadProjectFromDetectionInput {
+  id: EntityId
+}
+
 export interface GetWorkspaceTreeInput {
   workspaceId: EntityId
 }

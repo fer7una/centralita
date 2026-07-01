@@ -13,6 +13,7 @@ import type {
   ProjectGitInfo,
   ProjectNode,
   RenameWorkspaceInput,
+  ReloadProjectFromDetectionInput,
   UpdateGroupInput,
   ValidateProjectCommandInput,
   UpdateProjectInput,
@@ -65,6 +66,14 @@ export function createProjectFromDetection(
   input: CreateProjectFromDetectionInput,
 ) {
   return invokeCommand<ProjectNode>(TAURI_COMMANDS.createProjectFromDetection, {
+    input,
+  })
+}
+
+export function reloadProjectFromDetection(
+  input: ReloadProjectFromDetectionInput,
+) {
+  return invokeCommand<ProjectNode>(TAURI_COMMANDS.reloadProjectFromDetection, {
     input,
   })
 }

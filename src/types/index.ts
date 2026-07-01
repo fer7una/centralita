@@ -29,6 +29,7 @@ export type {
   ProjectRuntimeInput,
   ProcessRuntimeState,
   RenameWorkspaceInput,
+  ReloadProjectFromDetectionInput,
   RunRequest,
   RunHistoryEntry,
   RuntimeBulkFailure,

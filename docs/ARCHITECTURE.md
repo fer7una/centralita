@@ -42,6 +42,10 @@ stores. Frontend command and event access belongs in `src/shared/api/tauri`.
   `@tauri-apps/api/event` directly.
 - IPC DTO changes must update TypeScript contracts and Rust command DTOs in the
   same task.
+- Project reloads use `reload_project_from_detection`: the command re-runs
+  folder detection for an existing project, updates the persisted launch
+  contract, and preserves project identity, grouping, color, environment values,
+  and run history.
 
 ## Incremental Migration Rules
 

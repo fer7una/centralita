@@ -52,6 +52,7 @@ pub fn run() {
             commands::start_workspace,
             commands::stop_workspace,
             commands::create_project_from_detection,
+            commands::reload_project_from_detection,
             commands::rename_workspace,
             commands::delete_workspace,
             commands::create_group,

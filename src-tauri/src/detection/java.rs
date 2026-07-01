@@ -115,10 +115,10 @@ fn build_maven_result(snapshot: &ProjectScanSnapshot, pom_content: &str) -> Dete
         .unwrap_or_else(|| snapshot.root_directory_name());
 
     if is_spring_boot {
-        let args = vec!["spring-boot:run".into()];
+        let args = vec!["clean".into(), "spring-boot:run".into()];
         let command = executable
             .as_ref()
-            .map(|executable| format!("{} {}", executable, args[0]));
+            .map(|executable| format!("{} {}", executable, args.join(" ")));
         let command_validation = validate_command(
             &snapshot.root_path,
             Some(&snapshot.root_path),
@@ -424,7 +424,10 @@ mod tests {
             .expect("spring maven candidate should exist");
 
         assert_eq!(result.detected_type, DetectedProjectType::SpringBootMaven);
-        assert_eq!(result.command.as_deref(), Some("mvnw.cmd spring-boot:run"));
+        assert_eq!(
+            result.command.as_deref(),
+            Some("mvnw.cmd clean spring-boot:run")
+        );
     }
 
     #[test]

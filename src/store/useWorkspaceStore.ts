@@ -11,6 +11,7 @@ import {
   getWorkspaceTree,
   listWorkspaces,
   renameWorkspace,
+  reloadProjectFromDetection,
   updateGroup,
   updateProject,
 } from '../features/workspace/api'
@@ -438,6 +439,30 @@ export function useWorkspaceStore() {
     return project
   }
 
+  async function handleReloadProjectFromDetection(projectId: string) {
+    const project = findProjectInKnownTrees(projectId)
+    if (!project) {
+      return null
+    }
+
+    setState((current) => ({ ...current, error: null }))
+
+    try {
+      const reloadedProject = await reloadProjectFromDetection({ id: project.id })
+      await loadWorkspaces(state.activeWorkspaceId)
+      return reloadedProject
+    } catch (error) {
+      setState((current) => ({
+        ...current,
+        error:
+          error instanceof Error
+            ? error.message
+            : 'No se pudo recargar el proyecto.',
+      }))
+      throw error
+    }
+  }
+
   async function handleRenameProject(projectId: string, name: string) {
     await handleUpdateProject(projectId, { name })
   }
@@ -520,6 +545,7 @@ export function useWorkspaceStore() {
       deleteProject: handleDeleteProject,
       deleteWorkspace: handleDeleteWorkspace,
       refresh: () => loadWorkspaces(state.activeWorkspaceId),
+      reloadProjectFromDetection: handleReloadProjectFromDetection,
       moveGroupTree: handleMoveGroupTree,
       renameGroup: handleRenameGroup,
       renameProject: handleRenameProject,

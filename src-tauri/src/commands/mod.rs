@@ -95,6 +95,12 @@ pub struct ProjectRuntimeInput {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ReloadProjectFromDetectionInput {
+    pub id: EntityId,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct WorkspaceRuntimeInput {
     pub workspace_id: EntityId,
 }
@@ -539,6 +545,50 @@ pub fn create_project_from_detection(
         .map_err(|error| error.to_string())?;
 
     Ok(project)
+}
+
+#[tauri::command]
+pub fn reload_project_from_detection(
+    input: ReloadProjectFromDetectionInput,
+    database: State<'_, AppDatabase>,
+    process_manager: State<'_, ProcessManager>,
+) -> CommandResult<ProjectNode> {
+    let repository = ProjectRepository::new(database.inner().clone());
+    let Some(existing_project) = repository
+        .find_by_id(&input.id)
+        .map_err(|error| error.to_string())?
+    else {
+        return Err(format!("Project '{}' not found", input.id));
+    };
+
+    let current_state = process_manager.project_state(&existing_project);
+    if matches!(
+        current_state.status,
+        RuntimeStatus::Starting | RuntimeStatus::Running | RuntimeStatus::Stopping
+    ) {
+        return Err(format!(
+            "Project '{}' must be stopped or failed before reload",
+            input.id
+        ));
+    }
+
+    let detection_result = detection::analyze_project_folder(&existing_project.path)
+        .map_err(|error| error.to_string())?;
+    let updated_project = reloaded_project_from_detection(
+        existing_project.clone(),
+        detection_result,
+        timestamps::now_iso().map_err(|error| error.to_string())?,
+    );
+
+    process_manager
+        .remove_project_runtime(&existing_project)
+        .map_err(|error| error.to_string())?;
+
+    repository
+        .update(&updated_project)
+        .map_err(|error| error.to_string())?;
+
+    Ok(updated_project)
 }
 
 #[tauri::command]
@@ -989,6 +1039,33 @@ fn clear_runtime_for_projects(
     Ok(())
 }
 
+fn reloaded_project_from_detection(
+    existing_project: ProjectNode,
+    detection_result: DetectionResult,
+    updated_at: String,
+) -> ProjectNode {
+    ProjectNode {
+        id: existing_project.id,
+        workspace_id: existing_project.workspace_id,
+        group_id: existing_project.group_id,
+        name: existing_project.name,
+        path: detection_result.path,
+        detected_type: Some(detection_result.detected_type),
+        color: existing_project.color,
+        package_manager: detection_result.package_manager,
+        executable: detection_result.executable,
+        command: detection_result.command,
+        args: Some(detection_result.args),
+        env: existing_project.env,
+        working_dir: detection_result.working_dir,
+        detection_confidence: Some(detection_result.confidence),
+        detection_evidence: Some(detection_result.evidence),
+        warnings: Some(detection_result.warnings),
+        created_at: existing_project.created_at,
+        updated_at,
+    }
+}
+
 fn read_project_git_info(path: &Path) -> ProjectGitInfo {
     let Some(git_dir) = find_git_dir(path) else {
         return ProjectGitInfo {
@@ -1054,7 +1131,11 @@ fn read_git_branch(git_dir: &Path) -> Option<String> {
 mod tests {
     use std::fs;
 
-    use super::{read_project_git_info, ProjectGitInfo};
+    use super::{read_project_git_info, reloaded_project_from_detection, ProjectGitInfo};
+    use crate::models::{
+        CommandValidation, DetectedProjectType, DetectionEvidence, DetectionEvidenceKind,
+        DetectionResult, DetectionWarning, ProjectNode, ProjectPackageManager,
+    };
 
     fn temp_project_path(name: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!("centralita-{}-{}", name, uuid::Uuid::now_v7()))
@@ -1097,5 +1178,86 @@ mod tests {
         );
 
         fs::remove_dir_all(&project_dir).expect("temp project should be removed");
+    }
+
+    #[test]
+    fn reload_preserves_identity_and_local_env_while_refreshing_detection_fields() {
+        let existing_project = ProjectNode {
+            id: "project-api".into(),
+            workspace_id: "workspace-main".into(),
+            group_id: "group-backend".into(),
+            name: "API".into(),
+            path: r"C:\Projects\api-old".into(),
+            detected_type: Some(DetectedProjectType::JavaMaven),
+            color: Some("#2563eb".into()),
+            package_manager: Some(ProjectPackageManager::Maven),
+            executable: Some("mvn".into()),
+            command: Some("mvn package".into()),
+            args: Some(vec!["package".into()]),
+            env: Some([("JAVA_HOME".into(), r"C:\Java\21".into())].into()),
+            working_dir: Some(r"C:\Projects\api-old".into()),
+            detection_confidence: Some(0.35),
+            detection_evidence: None,
+            warnings: None,
+            created_at: "2026-04-16T07:00:00Z".into(),
+            updated_at: "2026-04-16T07:00:00Z".into(),
+        };
+        let detection_result = DetectionResult {
+            detected_type: DetectedProjectType::SpringBootMaven,
+            display_name: "api".into(),
+            path: r"C:\Projects\api".into(),
+            working_dir: Some(r"C:\Projects\api".into()),
+            package_manager: Some(ProjectPackageManager::Maven),
+            executable: Some("mvnw.cmd".into()),
+            command: Some("mvnw.cmd clean spring-boot:run".into()),
+            args: vec!["clean".into(), "spring-boot:run".into()],
+            command_preview: "mvnw.cmd clean spring-boot:run".into(),
+            command_validation: CommandValidation {
+                is_runnable: true,
+                command_preview: "mvnw.cmd clean spring-boot:run".into(),
+                resolved_executable: Some(r"C:\Projects\api\mvnw.cmd".into()),
+                issues: Vec::new(),
+            },
+            confidence: 0.85,
+            evidence: vec![DetectionEvidence {
+                kind: DetectionEvidenceKind::Plugin,
+                source: "pom.xml".into(),
+                detail: "Spring Boot Maven markers found".into(),
+                weight: 0.25,
+            }],
+            warnings: vec![DetectionWarning {
+                code: "command-validation-failed".into(),
+                message: "Review command".into(),
+                source: None,
+            }],
+        };
+
+        let reloaded = reloaded_project_from_detection(
+            existing_project.clone(),
+            detection_result,
+            "2026-04-16T08:00:00Z".into(),
+        );
+
+        assert_eq!(reloaded.id, existing_project.id);
+        assert_eq!(reloaded.workspace_id, existing_project.workspace_id);
+        assert_eq!(reloaded.group_id, existing_project.group_id);
+        assert_eq!(reloaded.name, existing_project.name);
+        assert_eq!(reloaded.color, existing_project.color);
+        assert_eq!(reloaded.env, existing_project.env);
+        assert_eq!(reloaded.created_at, existing_project.created_at);
+        assert_eq!(
+            reloaded.detected_type,
+            Some(DetectedProjectType::SpringBootMaven)
+        );
+        assert_eq!(reloaded.executable.as_deref(), Some("mvnw.cmd"));
+        assert_eq!(
+            reloaded.args,
+            Some(vec!["clean".into(), "spring-boot:run".into()])
+        );
+        assert_eq!(
+            reloaded.command.as_deref(),
+            Some("mvnw.cmd clean spring-boot:run")
+        );
+        assert_eq!(reloaded.updated_at, "2026-04-16T08:00:00Z");
     }
 }

@@ -26,6 +26,7 @@ vi.mock('./features/workspace/api', () => ({
   getWorkspaceTree: vi.fn(),
   listWorkspaces: vi.fn(),
   renameWorkspace: vi.fn(),
+  reloadProjectFromDetection: vi.fn(),
   updateGroup: vi.fn(),
   updateProject: vi.fn(),
   validateProjectCommand: vi.fn(),
@@ -242,6 +243,7 @@ describe('CentralitaApp', () => {
       workspaceTree.groups[0],
     )
     vi.mocked(workspaceApi.updateProject).mockResolvedValue(project)
+    vi.mocked(workspaceApi.reloadProjectFromDetection).mockResolvedValue(project)
     vi.mocked(workspaceApi.getProjectGitInfo).mockResolvedValue({
       isRepository: false,
       branch: null,
@@ -1598,6 +1600,104 @@ describe('CentralitaApp', () => {
       expect(runtimeErrorRow).not.toBeNull()
       expect(within(commandRow!).getByText('npm run dev')).toBeInTheDocument()
       expect(screen.getAllByText('STOPPED').length).toBeGreaterThan(0)
+      expect(
+        within(runtimeErrorRow!).getByText('Sin errores registrados'),
+      ).toBeInTheDocument()
+    })
+  })
+
+  it('reloads a failed project from detection without deleting and reimporting it', async () => {
+    const failedRuntime = {
+      workspaceId: 'workspace-main',
+      status: 'FAILED' as const,
+      projects: [
+        {
+          projectId: 'project-ui',
+          status: 'FAILED' as const,
+          pid: null,
+          startedAt: null,
+          stoppedAt: '2026-04-16T07:30:00Z',
+          exitCode: 1,
+          lastError: 'Process exited unexpectedly with code 1',
+          commandPreview: 'mvn spring-boot:run',
+        },
+      ],
+    }
+    const reloadedProject: ProjectNode = {
+      ...project,
+      detectedType: 'springBootMaven',
+      executable: 'mvnw.cmd',
+      command: 'mvnw.cmd clean spring-boot:run',
+      args: ['clean', 'spring-boot:run'],
+      packageManager: 'maven',
+      updatedAt: '2026-04-16T08:00:00Z',
+    }
+    let currentTree = workspaceTree
+
+    vi.mocked(runtimeApi.getWorkspaceRuntimeStatus).mockResolvedValue(
+      failedRuntime,
+    )
+    vi.mocked(workspaceApi.getWorkspaceTree).mockImplementation(
+      async (workspaceId: string) =>
+        workspaceId === 'workspace-ops' ? workspaceOpsTree : currentTree,
+    )
+    vi.mocked(workspaceApi.reloadProjectFromDetection).mockImplementation(
+      async (input) => {
+        expect(input).toEqual({ id: project.id })
+        currentTree = {
+          ...workspaceTree,
+          groups: workspaceTree.groups.map((group) =>
+            group.id === 'group-frontend'
+              ? { ...group, projects: [reloadedProject] }
+              : group,
+          ),
+        }
+
+        return reloadedProject
+      },
+    )
+
+    render(<CentralitaApp />)
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Expandir Frontend' }),
+    )
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Abrir proyecto centralita-ui',
+      }),
+    )
+
+    expect(
+      await screen.findByText('Process exited unexpectedly with code 1'),
+    ).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Recargar proyecto' }))
+
+    await waitFor(() => {
+      expect(workspaceApi.reloadProjectFromDetection).toHaveBeenCalledWith({
+        id: project.id,
+      })
+    })
+
+    await waitFor(() => {
+      const runtimePanel = screen
+        .getByRole('heading', { name: 'Runtime' })
+        .closest('article')
+
+      expect(runtimePanel).not.toBeNull()
+      const commandRow = within(runtimePanel!)
+        .getByText('Comando')
+        .closest('li')
+      const runtimeErrorRow = within(runtimePanel!)
+        .getByText('Último error runtime')
+        .closest('li')
+
+      expect(commandRow).not.toBeNull()
+      expect(runtimeErrorRow).not.toBeNull()
+      expect(
+        within(commandRow!).getByText('mvnw.cmd clean spring-boot:run'),
+      ).toBeInTheDocument()
       expect(
         within(runtimeErrorRow!).getByText('Sin errores registrados'),
       ).toBeInTheDocument()
